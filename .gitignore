@@ -5,6 +5,10 @@ __pycache__/
 
 # C extensions
 *.so
+# Custom
+.idea
+config.json
+mass_recover_*
 
 # Distribution / packaging
 .Python
