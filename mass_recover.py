@@ -1,27 +1,17 @@
-import requests, sys, time, random, csv, urllib.parse, logging, datetime, pprint, json
+import requests, sys, time, random, csv, urllib.parse, logging, datetime, json
 from timeit import default_timer as timer
 from multiprocessing.pool import ThreadPool
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from pyVim import connect
 from pyVmomi import vim
 
-pp = pprint.PrettyPrinter(indent=4)
-
-config = json.load(open('config.json'))
-
-threads = 5
-max_hosts = 3
-limit = 50
-in_file = 'in_data_full.csv'
-export = True
-debug = True
+config = json.load(open(sys.argv[1]))
 
 # DO NOT MODIFY BELOW
 sla = "Bronze"
-hu = []
 rn = {}
 timestr = time.strftime("%Y%m%d-%H%M%S")
-d = "{}_{}".format(threads, limit)
+d = "{}_{}_{}".format(config['threads'], config['max_hosts'], config['limit'])
 logging.basicConfig(
     filename='mass_recover_{}_{}.log'.format(timestr, d),
     filemode='w',
@@ -29,13 +19,15 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
+track = {}
+
 m = {"snap_not_found": 0,
      "vm_not_found": 0,
      "can_be_recovered": 0,
      "successful_recovery": 0,
      "failed_recovery": 0,
-     "max_hosts": max_hosts,
-     "thread_count": 0
+     "max_hosts": config['max_hosts'],
+     "thread_count": config['threads']
      }
 
 recoveries = {}
@@ -76,7 +68,7 @@ def run_assessment_threads(v, t):
 
 # Worker Process
 def run_assessment_process(vm):
-    vi = get_vm_id(vm['Object Name'])
+    vi, hs = get_vm_id(vm['Object Name'])
     if vi is None:
         logging.warning("{} - VM Not Found on Rubrik".format(vm['Object Name']))
         m['vm_not_found'] += 1
@@ -86,9 +78,15 @@ def run_assessment_process(vm):
         logging.warning("{} - Snapshot not found for VM".format(vm['Object Name']))
         m['snap_not_found'] += 1
         return
-    h = random.choice(list(vm_struc[vm['ESX Cluster']]['hosts']))
-    if h not in hu:
-        hu.append(h)
+    # Select next hosts if not using max_hosts
+    if ('ESX Cluster' not in vm) or (vm['ESX Cluster'] == '') or (vm['ESX Cluster'] is None):
+        vm['ESX Cluster'] = hs
+    if len(recoveries) <= (config['max_hosts']-1):
+        h = (list(vm_struc[vm['ESX Cluster']]['hosts']))[len(recoveries)]
+    # Select host from used host that has least executions
+    else:
+        h = min(recoveries, key=recoveries.get)
+    # Add host to used host array
     if h not in recoveries:
         recoveries[h] = 1
     else:
@@ -97,7 +95,7 @@ def run_assessment_process(vm):
     m['can_be_recovered'] += 1
     hi = (vm_struc[vm['ESX Cluster']]['hosts'][h]['id'])
     di = (vm_struc[vm['ESX Cluster']]['hosts'][h]['datastores'][vm['Datastore']]['id'])
-    if export:
+    if config['export']:
         export_vm(vm['Object Name'], si, hi, di, h)
     return m
 
@@ -134,7 +132,9 @@ def get_vm_structure():
         h[response['name']]['hosts'] = {}
         hc = 0
         for response_details in request['hosts']:
-            if hc == max_hosts:
+            if response_details['name'] in config['omit_hosts']:
+                continue
+            if hc == config['max_hosts']:
                 continue
             hc += 1
             h[response['name']]['hosts'][response_details['name']] = {'id': response_details['id']}
@@ -174,8 +174,7 @@ def get_vm_id(v):
     r = requests.get(u, headers=header, verify=False, timeout=15).json()
     for response in r['data']:
         if response['name'] == v:
-            set_vm_sla(response['id'])
-            return response['id']
+            return response['id'], response['infraPath'][-2]['name']
 
 
 def export_vm(v, si, hi, di, h):
@@ -213,7 +212,7 @@ def export_vm(v, si, hi, di, h):
             m['successful_recovery'] += 1
             s = True
         if "FAIL" in ls:
-            logging.info("{} - Export Status - {} ({}) - Start ({}) - End ({})".format(v, r['status'], r['nodeId'],
+            logging.error("{} - Export Status - {} ({}) - Start ({}) - End ({})".format(v, r['status'], r['nodeId'],
                                                                                        r['startTime'], r['endTime']))
             m['failed_recovery'] += 1
             s = True
@@ -238,14 +237,22 @@ def print_m(m):
         logging.info("{} : {}".format(i.replace('_', ' ').title(), m[i]))
 
 
-def get_objs(content, vimtype, folder=None, recurse=True):
-    if not folder:
-        folder = content.rootFolder
+def get_objs(c, t, f=None, r=True):
+    if not f:
+        f = c.rootFolder
     obj = {}
-    container = content.viewManager.CreateContainerView(folder, vimtype, recurse)
+    container = c.viewManager.CreateContainerView(f, t, r)
     for managed_object_ref in container.view:
         obj.update({managed_object_ref: managed_object_ref.name})
     return obj
+
+
+def find_host(c, n):
+    hs = get_objs(c, [vim.HostSystem])
+    for o in hs:
+        if o.name == n:
+            return o
+    return None
 
 
 # Get Rubrik Nodes so we can thread against them
@@ -260,14 +267,14 @@ print(" - Done")
 
 # Grab recovery info from csv
 print("Getting Recovery Data", end='')
-data = get_csv_data(in_file)
-if limit:
-    data = data[0:limit]
+data = get_csv_data(config['in_file'])
+if config['limit']:
+    data = data[0:config['limit']]
 print(" - Done")
 
 # Run the recoveries
 print("Running Recovery", end='')
-run_assessment_threads(data, threads)
+run_assessment_threads(data, config['threads'])
 print("Recovery Complete")
 end = timer()
 progress(len(data), len(data), "Completed in {} seconds".format(end - start))
@@ -280,46 +287,55 @@ print_m(m)
 for i in rn:
     logging.info("Recoveries Serviced {} - {}".format(i, rn[i]))
 
-for h in hu:
+for h in recoveries:
     logging.info("Recoveries Serviced {} - {}".format(h, recoveries[h]))
 
 # This happy mess will grab all performance metrics from vCenter that are available for each ESX host that
 # serviced requests. Currently it's just writing net.*
-if debug:
-    for host_name in hu:
+if config['debug']:
+    for host_name in recoveries:
+        # Log into the ESX Host
         service_instance = connect.SmartConnect(host=host_name,
                                                 user=config['esx_user'],
                                                 pwd=config['esx_pass']
                                                 )
         content = service_instance.RetrieveContent()
         perfManager = content.perfManager
-        host_mo = get_objs(content, [vim.HostSystem])[0]
+        host_mos = find_host(content, host_name)
         counters = {}
+        # Assemble a hash of details for the counters
         for ct in perfManager.perfCounter:
             cfn = ct.groupInfo.key + "." + ct.nameInfo.key + "." + ct.rollupType
             counters[ct.key] = {}
             counters[ct.key]['name'] = cfn
             counters[ct.key]['unit'] = ct.unitInfo.label
-        counterIDs = [m.counterId for m in perfManager.QueryAvailablePerfMetric(entity=host_mo)]
+        # Query for the counters
+        counterIDs = [m.counterId for m in perfManager.QueryAvailablePerfMetric(entity=host_mos)]
         metricIDs = [vim.PerformanceManager.MetricId(counterId=c, instance="*") for c in counterIDs]
-        spec = vim.PerformanceManager.QuerySpec(entity=host_mo,
+        spec = vim.PerformanceManager.QuerySpec(entity=host_mos,
                                                 metricId=metricIDs,
                                                 startTime=startTime)
         q = perfManager.QueryStats(querySpec=[spec])
+        # Figure out what to log
         for val in q[0].value:
-            co = counters[val.id.counterId]['name']
-            un = counters[val.id.counterId]['unit']
-            if "net.bytes" in co or "net.usage" in co:
+            if "net.bytes" in counters[val.id.counterId]['name'] or "net.usage" in counters[val.id.counterId]['name']:
                 calc = 0
                 samp = 0
-                for v in val.value:
-                    if v != -1:
-                        calc += v
-                        samp += 1
-                calc = round(calc / samp)
+                metric_max = 0
                 if val.id.instance == '':
-                    print("STAT - {} - {} - {}{} ({} points)".format(host_mo.name, co, calc, un, samp))
-                #else:
-                #    print("STAT - {} - {} ({}) - {}{} ({} points)".format(host_mo.name, co, val.id.instance, calc, un, samp))
+                    for v in val.value:
+                        if v != -1:
+                            calc += v
+                            if v > metric_max:
+                                metric_max = v
+                            samp += 1
+                    calc = round(calc / samp)
+                    logging.info("{} - {} - avg:{}{} max:{}{} samples:{} - experimental".format(host_mos.name,
+                                                                                                counters[val.id.counterId]['name'],
+                                                                                                calc,
+                                                                                                counters[val.id.counterId]['unit'],
+                                                                                                metric_max,
+                                                                                                counters[val.id.counterId]['unit'],
+                                                                                                samp))
         connect.Disconnect(service_instance)
 exit()
