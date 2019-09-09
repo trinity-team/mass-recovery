@@ -1,10 +1,10 @@
-import requests, sys, time, random, csv, urllib.parse, logging, datetime, json
+import requests, sys, time, random, csv, urllib.parse, logging, datetime, json, pprint
 from timeit import default_timer as timer
 from multiprocessing.pool import ThreadPool
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from pyVim import connect
 from pyVmomi import vim
-
+pp = pprint.PrettyPrinter(indent=4)
 config = json.load(open(sys.argv[1]))
 
 # DO NOT MODIFY BELOW
@@ -86,15 +86,18 @@ def run_assessment_process(vm):
     # Select host from used host that has least executions
     else:
         h = min(recoveries, key=recoveries.get)
+    # See if I'm assigning a new datastore in the csv, or just use the last known
+    if ('Datastore' not in vm) or (vm['Datastore'] == '') or (vm['Datastore'] is None):
+        vm['Datastore'] = datastore_map[get_vdisk_id(vi)]
     # Add host to used host array
     if h not in recoveries:
         recoveries[h] = 1
     else:
         recoveries[h] += 1
-    logging.info("{} - Export {} to {}".format(vm['Object Name'], si, h))
+    di = (vm_struc[vm['ESX Cluster']]['hosts'][h]['datastores'][vm['Datastore']]['id'])
+    logging.info("{} - Export {} to {} (disk {})".format(vm['Object Name'], si, h, di))
     m['can_be_recovered'] += 1
     hi = (vm_struc[vm['ESX Cluster']]['hosts'][h]['id'])
-    di = (vm_struc[vm['ESX Cluster']]['hosts'][h]['datastores'][vm['Datastore']]['id'])
     if config['export']:
         export_vm(vm['Object Name'], si, hi, di, h)
     return m
@@ -165,6 +168,30 @@ def get_sla_id(s):
     for o in r['data']:
         if o['name'] == sla:
             return o['id']
+
+
+# Grab the Datastore name from the VM Record
+def get_vdisk_id(v):
+    c = "/api/v1/vmware/vm/"
+    u = ("{}{}{}".format(random.choice(node_ips), c, urllib.parse.quote(v)))
+    r = requests.get(u, headers=header, verify=False, timeout=15).json()
+    return r['virtualDiskIds'][0]
+
+
+# Grab the Datastore name from the VM Record
+def get_datastore_map():
+    dsm = {}
+    c = "/api/internal/vmware/datastore"
+    u = ("{}{}".format(random.choice(node_ips), c))
+    r = requests.get(u, headers=header, verify=False, timeout=15).json()
+    for z in r['data']:
+        cc = "/api/internal/vmware/datastore/"
+        uu = ("{}{}{}".format(random.choice(node_ips), cc, z['id']))
+        rr = requests.get(uu, headers=header, verify=False, timeout=30).json()
+        if 'virtualDisks' in rr:
+            for vd in rr['virtualDisks']:
+                dsm[vd['id']] = z['name']
+    return dsm
 
 
 # Returns vm_id from vm_name
@@ -263,6 +290,12 @@ print(" - Done")
 # Get VMware structure so that we can round robin
 print("Getting VMware Structures", end='')
 vm_struc = get_vm_structure()
+print(" - Done")
+
+
+# Get datastore map
+print("Getting Datastore Map", end='')
+datastore_map = get_datastore_map()
 print(" - Done")
 
 # Grab recovery info from csv
