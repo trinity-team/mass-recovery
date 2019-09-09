@@ -2,7 +2,6 @@
 ## Requires
 - python3
 - requests
-- timeit
 - pyvmomi
 
 ## Usage
