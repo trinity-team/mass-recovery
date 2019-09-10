@@ -69,6 +69,10 @@ def run_assessment_threads(v, t):
 # Worker Process
 def run_assessment_process(vm):
     vi, hs = get_vm_id(vm['Object Name'])
+    if m['can_be_recovered'] == config['limit']:
+        return
+    if hs not in config['compute_cluster']:
+        return
     if vi is None:
         logging.warning("{} - VM Not Found on Rubrik".format(vm['Object Name']))
         m['vm_not_found'] += 1
@@ -78,27 +82,32 @@ def run_assessment_process(vm):
         logging.warning("{} - Snapshot not found for VM".format(vm['Object Name']))
         m['snap_not_found'] += 1
         return
-    # Select next hosts if not using max_hosts
-    if ('ESX Cluster' not in vm) or (vm['ESX Cluster'] == '') or (vm['ESX Cluster'] is None):
-        vm['ESX Cluster'] = hs
-    if len(recoveries) <= (config['max_hosts']-1):
-        h = (list(vm_struc[vm['ESX Cluster']]['hosts']))[len(recoveries)]
-    # Select host from used host that has least executions
-    else:
-        h = min(recoveries, key=recoveries.get)
-    # See if I'm assigning a new datastore in the csv, or just use the last known
-    if ('Datastore' not in vm) or (vm['Datastore'] == '') or (vm['Datastore'] is None):
-        vm['Datastore'] = datastore_map[get_vdisk_id(vi)]
-    # Add host to used host array
-    if h not in recoveries:
-        recoveries[h] = 1
-    else:
-        recoveries[h] += 1
-    di = (vm_struc[vm['ESX Cluster']]['hosts'][h]['datastores'][vm['Datastore']]['id'])
-    logging.info("{} - Export {} to {} (disk {})".format(vm['Object Name'], si, h, di))
     m['can_be_recovered'] += 1
-    hi = (vm_struc[vm['ESX Cluster']]['hosts'][h]['id'])
-    if config['export']:
+    if config['function'] == 'livemount':
+        livemount_vm(vm['Object Name'], si)
+    elif config['function'] == 'unmount':
+        unmount_vm(vm['Object Name'], vi)
+    elif config['function'] == 'export':
+        # Select next hosts if not using max_hosts
+        if ('ESX Cluster' not in vm) or (vm['ESX Cluster'] == '') or (vm['ESX Cluster'] is None):
+            vm['ESX Cluster'] = hs
+        if len(recoveries) <= (config['max_hosts'] - 1):
+            # h = (list(vm_struc[vm['ESX Cluster']]['hosts']))[len(recoveries)]
+            h = random.choice(list(vm_struc[vm['ESX Cluster']]['hosts']))
+        # Select host from used host that has least executions
+        else:
+            h = min(recoveries, key=recoveries.get)
+        # See if I'm assigning a new datastore in the csv, or just use the last known
+        if ('Datastore' not in vm) or (vm['Datastore'] == '') or (vm['Datastore'] is None):
+            vm['Datastore'] = datastore_map[get_vdisk_id(vi)]
+        # Add host to used host array
+        if h not in recoveries:
+            recoveries[h] = 1
+        else:
+            recoveries[h] += 1
+        di = (vm_struc[vm['ESX Cluster']]['hosts'][h]['datastores'][vm['Datastore']]['id'])
+        logging.info("{} - Export {} to {} (disk {})".format(vm['Object Name'], si, h, di))
+        hi = (vm_struc[vm['ESX Cluster']]['hosts'][h]['id'])
         export_vm(vm['Object Name'], si, hi, di, h)
     return m
 
@@ -123,31 +132,37 @@ def get_csv_data(f):
 
 # Get Datastore DICT
 def get_vm_structure():
-    h = {}
-    call = "/api/v1/vmware/compute_cluster"
-    uri = ("{}{}?limit=999&primary_cluster_id=local".format(random.choice(node_ips), call))
-    request = requests.get(uri, headers=header, verify=False, timeout=30).json()
-    for response in request['data']:
-        h[response['name']] = {'id': response['id']}
+    try:
+        with open(config['vmw_cache_file']) as j:
+            h = json.load(j)
+    except FileNotFoundError:
+        h = {}
         call = "/api/v1/vmware/compute_cluster"
-        uri = ("{}{}/{}".format(random.choice(node_ips), call, response['id']))
-        request = requests.get(uri, headers=header, verify=False, timeout=60).json()
-        h[response['name']]['hosts'] = {}
-        hc = 0
-        for response_details in request['hosts']:
-            if response_details['name'] in config['omit_hosts']:
-                continue
-            if hc == config['max_hosts']:
-                continue
-            hc += 1
-            h[response['name']]['hosts'][response_details['name']] = {'id': response_details['id']}
-            h[response['name']]['hosts'][response_details['name']]['datastores'] = {}
-            call = "/api/v1/vmware/host"
-            uri = ("{}{}/{}".format(random.choice(node_ips), call, response_details['id']))
-            request = requests.get(uri, headers=header, verify=False, timeout=15).json()
-            for response_datastores in request['datastores']:
-                h[response['name']]['hosts'][response_details['name']]['datastores'][response_datastores['name']] = {
-                    'id': response_datastores['id']}
+        uri = ("{}{}?limit=999&primary_cluster_id=local".format(random.choice(node_ips), call))
+        request = requests.get(uri, headers=header, verify=False, timeout=30).json()
+        for response in request['data']:
+            h[response['name']] = {'id': response['id']}
+            call = "/api/v1/vmware/compute_cluster"
+            uri = ("{}{}/{}".format(random.choice(node_ips), call, response['id']))
+            request = requests.get(uri, headers=header, verify=False, timeout=60).json()
+            h[response['name']]['hosts'] = {}
+            hc = 0
+            for response_details in request['hosts']:
+                if response_details['name'] in config['omit_hosts']:
+                    continue
+                if hc == config['max_hosts']:
+                    continue
+                hc += 1
+                h[response['name']]['hosts'][response_details['name']] = {'id': response_details['id']}
+                h[response['name']]['hosts'][response_details['name']]['datastores'] = {}
+                call = "/api/v1/vmware/host"
+                uri = ("{}{}/{}".format(random.choice(node_ips), call, response_details['id']))
+                request = requests.get(uri, headers=header, verify=False, timeout=15).json()
+                for response_datastores in request['datastores']:
+                    h[response['name']]['hosts'][response_details['name']]['datastores'][response_datastores['name']] = {
+                        'id': response_datastores['id']}
+        with open(config['vmw_cache_file'], 'w') as o:
+            json.dump(h, o)
     return h
 
 
@@ -155,7 +170,7 @@ def get_vm_structure():
 def set_vm_sla(v):
     c = "/api/v1/vmware/vm"
     lo = {
-        "configuredSSlaDomainId": "{}".format(get_sla_id(sla))
+        "configuredSlaDomainId": "{}".format(get_sla_id(sla))
     }
     u = ("{}{}/{}".format(random.choice(node_ips), c, v))
     r = requests.patch(u, json=lo, headers=header, verify=False, timeout=15).json()
@@ -180,17 +195,23 @@ def get_vdisk_id(v):
 
 # Grab the Datastore name from the VM Record
 def get_datastore_map():
-    dsm = {}
-    c = "/api/internal/vmware/datastore"
-    u = ("{}{}".format(random.choice(node_ips), c))
-    r = requests.get(u, headers=header, verify=False, timeout=15).json()
-    for z in r['data']:
-        cc = "/api/internal/vmware/datastore/"
-        uu = ("{}{}{}".format(random.choice(node_ips), cc, z['id']))
-        rr = requests.get(uu, headers=header, verify=False, timeout=30).json()
-        if 'virtualDisks' in rr:
-            for vd in rr['virtualDisks']:
-                dsm[vd['id']] = z['name']
+    try:
+        with open(config['ds_cache_file']) as j:
+            dsm = json.load(j)
+    except FileNotFoundError:
+        dsm = {}
+        c = "/api/internal/vmware/datastore"
+        u = ("{}{}".format(random.choice(node_ips), c))
+        r = requests.get(u, headers=header, verify=False, timeout=15).json()
+        for z in r['data']:
+            cc = "/api/internal/vmware/datastore/"
+            uu = ("{}{}{}".format(random.choice(node_ips), cc, z['id']))
+            rr = requests.get(uu, headers=header, verify=False, timeout=30).json()
+            if 'virtualDisks' in rr:
+                for vd in rr['virtualDisks']:
+                    dsm[vd['id']] = z['name']
+        with open(config['ds_cache_file'], 'w') as o:
+            json.dump(dsm, o)
     return dsm
 
 
@@ -204,10 +225,65 @@ def get_vm_id(v):
             return response['id'], response['infraPath'][-2]['name']
 
 
+def livemount_table():
+    lma = {}
+    c = "/api/v1/vmware/vm/snapshot/mount"
+    u = ("{}{}?limit=9999".format(random.choice(node_ips), c))
+    r = requests.get(u, headers=header, verify=False, timeout=15).json()
+    for response in r['data']:
+        if response['vmId'] not in lma:
+            lma[response['vmId']] = []
+        lma[response['vmId']].append(response['id'])
+    return lma
+
+
+def unmount_vm(v,vi):
+    c = "/api/v1/vmware/vm/snapshot/mount/"
+    for si in lmt[vi]:
+        print("Going to unmount {}".format(si))
+        u = ("{}{}{}".format(random.choice(node_ips), c, si))
+        r = requests.delete(u, headers=header, verify=False, timeout=15).json()
+        pp.pprint(r)
+    return
+
+
+def livemount_vm(v, si):
+    c = "/api/v1/vmware/vm/snapshot"
+    lo = {
+        "disableNetwork": True,
+        "removeNetworkDevices": False,
+        "powerOn": False,
+    }
+    u = ("{}{}/{}/mount".format(random.choice(node_ips), c, si))
+    r = requests.post(u, json=lo, headers=header, verify=False, timeout=15).json()
+    t = r['id']
+    s = False
+    ls = ""
+    while not s:
+        c = "/api/v1/vmware/vm/request"
+        u = ("{}{}/{}".format(random.choice(node_ips), c, t))
+        r = requests.get(u, headers=header, verify=False, timeout=15).json()
+        if ls != r['status']:
+            logging.info("{} - Livemount Status - {}".format(v, r['status']))
+        ls = r['status']
+        if ls == "SUCCEEDED":
+            logging.info(
+                "{} - {} - {} - {} - {} ".format(v, r['status'], r['nodeId'],  r['startTime'], r['endTime']))
+            m['successful_recovery'] += 1
+            s = True
+        if "FAIL" in ls:
+            logging.error("{} - Livemount Status - {} ({}) - Start ({}) - End ({})".format(v, r['status'], r['nodeId'],
+                                                                                        r['startTime'], r['endTime']))
+            m['failed_recovery'] += 1
+            s = True
+        time.sleep(3)
+    return
+
+
 def export_vm(v, si, hi, di, h):
     c = "/api/v1/vmware/vm/snapshot"
     lo = {
-        "vmName": "EXP_{}".format(v),
+        "vmName": "{}{}".format(config['prefix'],v),
         "disableNetwork": True,
         "removeNetworkDevices": False,
         "powerOn": False,
@@ -288,15 +364,20 @@ node_ips = get_ips(config['rubrik_host'])
 print(" - Done")
 
 # Get VMware structure so that we can round robin
-print("Getting VMware Structures", end='')
-vm_struc = get_vm_structure()
-print(" - Done")
+if config['function'] == 'export':
+    print("Getting VMware Structures", end='')
+    vm_struc = get_vm_structure()
+    print(" - Done")
 
 
-# Get datastore map
-print("Getting Datastore Map", end='')
-datastore_map = get_datastore_map()
-print(" - Done")
+    # Get datastore map
+    print("Getting Datastore Map", end='')
+    datastore_map = get_datastore_map()
+    print(" - Done")
+
+if config['function'] == 'unmount':
+    lmt = livemount_table()
+
 
 # Grab recovery info from csv
 print("Getting Recovery Data", end='')

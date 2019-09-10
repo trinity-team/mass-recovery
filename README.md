@@ -102,29 +102,25 @@ mass_recover_[timestamp]_[threads]_[max_hosts]_[limit]
 {
   "threads": 3,
   "max_hosts": 3,
-  "export": true,
-  "limit": 10,
-  "debug": true,
-  "in_file": "in_data_full.csv",
+  "function": 'livemount',
+  "limit": 5,
+  "ds_cache_file": "datastore.cache",
+  "vmw_cache_file": "infrastructure.cache",
+  "compute_cluster": "Clusterpoc01-67-cluster02",
+  "in_file": "in_data.csv",
   "prefix": "pm-test_",
-  "rubrik_host": "ip/fqdn",
+  "rubrik_host": "172.21.8.33",
   "rubrik_key": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI5ZDFkYjQ2Yi1iYmEzLTRkMGItYjc5ZC01OGZiYWE4ZTgzOWIiLCJpc3MiOiJlNjY3ZWY4Yi01Y2E2LTQ1OTYtYjBhMi1jMjZjNzVhMGMzMjYiLCJqdGkiOiIxNTgyNzdlZS00M2M0LTRlODYtYjU4NC0xMzA0ZmY3OTI1ZmIifQ.9pAudx3eXYAoe9l2Y_9Qy64FldED9EeGHErE4823EAM",
-  "esx_user": "root",
-  "esx_pass": "supersecret"
-  "omit_hosts": ["poc-esx01.rangers.lab"]
+  "omit_hosts": ["poc-esx06.rangers.lab"]
 }
 ```
 - threads (int) - number of simultaneous exports
 - max_hosts (int) - number of esx hosts to export to
-- export (bool) - run exports 
-- limit (int) - number of line items to queue from csv
-- debug (bool) - currently enables gathering of esx stats
+- function (str) - one of - export/livemount/unmount 
 - in_file (str) - relative path to csv
 - prefix (str) - prefix for exported VMs
 - rubrik_host (str) - ip/fqdn of rubrik node
 - rubrik_key (str) - api token for rubrik
-- esx_user (str) - esx username
-- esx_pass (str) - esx password 
 - omit_hosts (arr/str) - esx hosts that we don't want to export to
 
 ## .csv input file
