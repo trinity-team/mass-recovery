@@ -2,8 +2,6 @@ import requests, sys, time, random, csv, urllib.parse, logging, datetime, json, 
 from timeit import default_timer as timer
 from multiprocessing.pool import ThreadPool
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
-from pyVim import connect
-from pyVmomi import vim
 pp = pprint.PrettyPrinter(indent=4)
 config = json.load(open(sys.argv[1]))
 
@@ -13,7 +11,7 @@ rn = {}
 timestr = time.strftime("%Y%m%d-%H%M%S")
 d = "{}_{}_{}".format(config['threads'], config['max_hosts'], config['limit'])
 logging.basicConfig(
-    filename='mass_recover_{}_{}.log'.format(timestr, d),
+    filename='mass_{}_{}_{}.log'.format(config['function'], timestr, d),
     filemode='w',
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -239,11 +237,11 @@ def livemount_table():
 
 def unmount_vm(v,vi):
     c = "/api/v1/vmware/vm/snapshot/mount/"
-    for si in lmt[vi]:
-        print("Going to unmount {}".format(si))
-        u = ("{}{}{}".format(random.choice(node_ips), c, si))
-        r = requests.delete(u, headers=header, verify=False, timeout=15).json()
-        pp.pprint(r)
+    if vi in lmt:
+        for si in lmt[vi]:
+            u = ("{}{}{}".format(random.choice(node_ips), c, si))
+            logging.info("{} - {} - {} - {}".format(v, 'Unmounting', vi, si))
+            r = requests.delete(u, headers=header, verify=False, timeout=15).json()
     return
 
 
@@ -407,6 +405,8 @@ for h in recoveries:
 # This happy mess will grab all performance metrics from vCenter that are available for each ESX host that
 # serviced requests. Currently it's just writing net.*
 if config['debug']:
+    from pyVim import connect
+    from pyVmomi import vim
     for host_name in recoveries:
         # Log into the ESX Host
         service_instance = connect.SmartConnect(host=host_name,

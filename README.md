@@ -1,8 +1,8 @@
-# mass-export
+# mass-recovery
 ## Requires
 - python3
 - requests
-- pyvmomi
+- pyvmomi (optional)
 
 ## Usage
 ## Running the script
