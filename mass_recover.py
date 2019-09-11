@@ -1,4 +1,4 @@
-import requests, sys, time, random, csv, urllib.parse, logging, datetime, json, os
+import requests, sys, time, random, csv, urllib.parse, logging, datetime, json, os, statistics
 from timeit import default_timer as timer
 from multiprocessing.pool import ThreadPool
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
@@ -7,10 +7,15 @@ config = json.load(open(sys.argv[1]))
 if 'debug' not in config:
     config['debug'] = False
 
+if 'max_hosts' not in config:
+    config['max_hosts'] = 0
+
 sla = "Bronze"
 rn = {}
 timestr = time.strftime("%Y%m%d-%H%M%S")
 d = "{}_{}_{}".format(config['threads'], config['max_hosts'], config['limit'])
+
+kpi = []
 
 vmw_file = 'cache/{}.vmw'.format(config['rubrik_host'])
 ds_file = 'cache/{}.ds'.format(config['rubrik_host'])
@@ -74,6 +79,7 @@ def run_assessment_threads(v, t):
 
 # Worker Process
 def run_assessment_process(vm):
+    b = timer()
     vi, hs = get_vm_id(vm['Object Name'])
     if m['can_be_recovered'] == config['limit']:
         return
@@ -113,6 +119,8 @@ def run_assessment_process(vm):
         logging.info("{} - Export {} to {} (disk {})".format(vm['Object Name'], si, h, di))
         hi = (vm_struc[vm['ESX Cluster']]['hosts'][h]['id'])
         export_vm(vm['Object Name'], si, hi, di, h)
+        f = timer()
+        kpi.append(f-b)
     return m
 
 
@@ -271,8 +279,6 @@ def livemount_vm(v, si):
         c = "/api/v1/vmware/vm/request"
         u = ("{}{}/{}".format(random.choice(node_ips), c, t))
         r = requests.get(u, headers=header, verify=False, timeout=15).json()
-        if ls != r['status']:
-            logging.info("{} - Livemount Status - {}".format(v, r['status']))
         ls = r['status']
         if ls == "SUCCEEDED":
             logging.info(
@@ -311,8 +317,6 @@ def export_vm(v, si, hi, di, h):
         c = "/api/v1/vmware/vm/request"
         u = ("{}{}/{}".format(random.choice(node_ips), c, t))
         r = requests.get(u, headers=header, verify=False, timeout=15).json()
-        if ls != r['status']:
-            logging.info("{} - Export Status - {}".format(v, r['status']))
         ls = r['status']
         if ls == "SUCCEEDED":
             logging.info(
@@ -345,8 +349,23 @@ def get_snapshot_id(i):
 
 def print_m(m):
     for i in m:
-        print("\t {} : {}".format(i.replace('_', ' ').title(), m[i]))
-        logging.info("{} : {}".format(i.replace('_', ' ').title(), m[i]))
+        if m[i] != 0:
+            print("\t {} : {}".format(i.replace('_', ' ').title(), m[i]))
+            logging.info("{} : {}".format(i.replace('_', ' ').title(), m[i]))
+    if kpi:
+        median = round(statistics.median_high(kpi),3)
+        mean = round(statistics.mean(kpi),3)
+        mn = round(min(kpi),3)
+        mx = round(max(kpi),3)
+        print("Operation Stats:".format(i.replace('_', ' ').title(), m[i]))
+        print("\t {} : {}".format('Median', median))
+        logging.info("{} : {}".format('Median', median))
+        print("\t {} : {}".format('Mean', mean))
+        logging.info("{} : {}".format('Mean', mean))
+        print("\t {} : {}".format('Min', mn))
+        logging.info("{} : {}".format('Min', mn))
+        print("\t {} : {}".format('Max', mx))
+        logging.info("{} : {}".format('Max', mx))
 
 
 def get_objs(c, t, f=None, r=True):
@@ -469,3 +488,4 @@ if config['debug']:
                                                                                                 samp))
         connect.Disconnect(service_instance)
 exit()
+
