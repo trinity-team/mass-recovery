@@ -9,14 +9,104 @@
 ```
 ./mass_recover.py [config_file]
 ```
-## Looking at logs
-### File Naming
+
+
+## Configuration File
+
 ```
-mass_recover_20190829-191212_6_2_12.log 
-mass_recover_[timestamp]_[threads]_[max_hosts]_[limit]
+{
+  "threads": 3,
+  "limit": 5,
+  "in_file": "in_data.csv",
+  "function": 'livemount',
+  "rubrik_host": "172.21.8.33",
+  "rubrik_key": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI5ZDFkYjQ2Yi1iYmEzLTRkMGItYjc5ZC01OGZiYWE4ZTgzOWIiLCJpc3MiOiJlNjY3ZWY4Yi01Y2E2LTQ1OTYtYjBhMi1jMjZjNzVhMGMzMjYiLCJqdGkiOiIxNTgyNzdlZS00M2M0LTRlODYtYjU4NC0xMzA0ZmY3OTI1ZmIifQ.9pAudx3eXYAoe9l2Y_9Qy64FldED9EeGHErE4823EAM",
+  "prefix": "pm-test_",
+  "max_hosts": 3,
+  "omit_hosts": ["poc-esx06.rangers.lab"],
+  "debug": false,
+  "esx_user": "user",
+  "esx_pass": "password"
+}
+```
+### Mandatory Configuration -
+- threads (int) - number of simultaneous operations
+- in_file (str) - relative path to input file
+- function (str) - one of - export/livemount/unmount 
+- rubrik_host (str) - ip/fqdn of Rubrik node
+- rubrik_key (str) - api token for Rubrik 
+
+### Additional Mandatory Configuration for Exports
+- prefix (str) - prefix for exported VM names
+- max_hosts (int) - number of esx hosts to export to
+
+### Optional Configuration
+- limit (int) - how many records to use from input file, useful for testing
+- omit_hosts (arr/str) - esx hosts that we don't want to export to
+
+### Super Experimental Configuration (Requires pyvmomi)
+- debug (bool) - Turn on ESX Counter retrieval
+- esx_user (str) - ESX username
+- esx_pass (str) - ESX password
+
+## Input File
+### Example 1
+```
+Object Name,ESX Cluster,Datastore
+fileserver-001,poc01-67-cluster02,PURE-DS1-10TB
+fileserver-002,poc01-67-cluster02,PURE-DS1-10TB
+fileserver-003,poc01-67-cluster02,PURE-DS1-10TB
+fileserver-004,poc01-67-cluster02,PURE-DS1-10TB
+fileserver-005,poc01-67-cluster02,PURE-DS1-10TB
+fileserver-006,poc01-67-cluster02,PURE-DS1-10TB
+```
+### Example 2
+```
+Object Name
+fileserver-001
+fileserver-002
+fileserver-003
+fileserver-004
+fileserver-005
+fileserver-006
+```
+- Object Name is not optional
+- Header row for used fields are not optional
+- Undefined Cluster/Datastore will us last known locations
+
+## Recommended Configuration Changes
+### ESX Hosts 
+Below are the default and recommended settings in order to allow for more NFS Datastores to be mounted for the purpose 
+of mass livemounts. More details can be found at:  VMW KB: https://kb.vmware.com/s/article/2239 
+```
+ESXi Settings (defaults):
+NFS.MaxVolumes 8
+Net.TcpipHeapSize 0 (require host reboot)
+Net.TcpipHeapMax 512 (require host reboot)
+
+ESXi Settings (recommended):
+NFS.MaxVolumes 256
+Net.TcpipHeapSize 32 (require host reboot)
+Net.TcpipHeapMax 1536 (require host reboot)
+```
+### Rubrik Cluster 
+Below are the default and recommended settings in order to increase limit for simultaneous exports per node.
+```
+Rubrik Settings (defaults):
+cerebro.exportJobInMemorySemShares 1
+
+Rubrik Settings (recommended):
+cerebro.exportJobInMemorySemShares 100
 ```
 
-### The output
+## Logging
+### Log File Naming
+```
+logs/mass_export_20190910-173024_1_1_1.log
+logs/mass_[function]_[time-stamp]_[threads]_[max_hosts]_[limit]
+```
+
+### Log File Output 
 <details><summary> Expand </summary>
 <p>
 
@@ -85,51 +175,9 @@ mass_recover_[timestamp]_[threads]_[max_hosts]_[limit]
 2019-08-29 19:44:05,171 - root - INFO - Recoveries Serviced cluster:::RVM15CS006048 - 1
 2019-08-29 19:44:05,172 - root - INFO - Recoveries Serviced poc-esx03.rangers.lab - 6
 2019-08-29 19:44:05,172 - root - INFO - Recoveries Serviced poc-esx05.rangers.lab - 6
-2019-08-29 19:44:17,896 - root - INFO - poc-esx03.rangers.lab - net.bytesTx.average - 164648KBps (11 points)
-2019-08-29 19:44:17,999 - root - INFO - poc-esx03.rangers.lab - net.bytesRx.average - 339643KBps (11 points)
-2019-08-29 19:44:18,103 - root - INFO - poc-esx03.rangers.lab - net.usage.average - 504291KBps (11 points)
-2019-08-29 19:44:30,340 - root - INFO - poc-esx05.rangers.lab - net.bytesTx.average - 6707KBps (2 points)
-2019-08-29 19:44:30,442 - root - INFO - poc-esx05.rangers.lab - net.bytesRx.average - 13293KBps (2 points)
-2019-08-29 19:44:30,541 - root - INFO - poc-esx05.rangers.lab - net.usage.average - 20001KBps (2 points)
 ```
-
 </p>
 </details>
 
-## Configuration File
 
-```
-{
-  "threads": 3,
-  "max_hosts": 3,
-  "function": 'livemount',
-  "limit": 5,
-  "ds_cache_file": "datastore.cache",
-  "vmw_cache_file": "infrastructure.cache",
-  "compute_cluster": "Clusterpoc01-67-cluster02",
-  "in_file": "in_data.csv",
-  "prefix": "pm-test_",
-  "rubrik_host": "172.21.8.33",
-  "rubrik_key": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI5ZDFkYjQ2Yi1iYmEzLTRkMGItYjc5ZC01OGZiYWE4ZTgzOWIiLCJpc3MiOiJlNjY3ZWY4Yi01Y2E2LTQ1OTYtYjBhMi1jMjZjNzVhMGMzMjYiLCJqdGkiOiIxNTgyNzdlZS00M2M0LTRlODYtYjU4NC0xMzA0ZmY3OTI1ZmIifQ.9pAudx3eXYAoe9l2Y_9Qy64FldED9EeGHErE4823EAM",
-  "omit_hosts": ["poc-esx06.rangers.lab"]
-}
-```
-- threads (int) - number of simultaneous exports
-- max_hosts (int) - number of esx hosts to export to
-- function (str) - one of - export/livemount/unmount 
-- in_file (str) - relative path to csv
-- prefix (str) - prefix for exported VMs
-- rubrik_host (str) - ip/fqdn of rubrik node
-- rubrik_key (str) - api token for rubrik
-- omit_hosts (arr/str) - esx hosts that we don't want to export to
 
-## .csv input file
-```
-Object Name,ESX Cluster,Datastore
-fileserver-001,poc01-67-cluster02,PURE-DS1-10TB
-fileserver-002,poc01-67-cluster02,PURE-DS1-10TB
-fileserver-003,poc01-67-cluster02,PURE-DS1-10TB
-fileserver-004,poc01-67-cluster02,PURE-DS1-10TB
-fileserver-005,poc01-67-cluster02,PURE-DS1-10TB
-fileserver-006,poc01-67-cluster02,PURE-DS1-10TB
-```

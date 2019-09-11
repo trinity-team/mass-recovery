@@ -1,17 +1,23 @@
-import requests, sys, time, random, csv, urllib.parse, logging, datetime, json, pprint
+import requests, sys, time, random, csv, urllib.parse, logging, datetime, json, os
 from timeit import default_timer as timer
 from multiprocessing.pool import ThreadPool
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
-pp = pprint.PrettyPrinter(indent=4)
-config = json.load(open(sys.argv[1]))
 
-# DO NOT MODIFY BELOW
+config = json.load(open(sys.argv[1]))
+if 'debug' not in config:
+    config['debug'] = False
+
 sla = "Bronze"
 rn = {}
 timestr = time.strftime("%Y%m%d-%H%M%S")
 d = "{}_{}_{}".format(config['threads'], config['max_hosts'], config['limit'])
+
+vmw_file = 'cache/{}.vmw'.format(config['rubrik_host'])
+ds_file = 'cache/{}.ds'.format(config['rubrik_host'])
+
+os.makedirs('log', exist_ok=True)
 logging.basicConfig(
-    filename='mass_{}_{}_{}.log'.format(config['function'], timestr, d),
+    filename='log/mass_{}_{}_{}.log'.format(config['function'], timestr, d),
     filemode='w',
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -23,7 +29,9 @@ m = {"snap_not_found": 0,
      "vm_not_found": 0,
      "can_be_recovered": 0,
      "successful_recovery": 0,
-     "failed_recovery": 0,
+     "successful_livemount": 0,
+     "successful_unmount": 0,
+     "failed_operations": 0,
      "max_hosts": config['max_hosts'],
      "thread_count": config['threads']
      }
@@ -68,8 +76,6 @@ def run_assessment_threads(v, t):
 def run_assessment_process(vm):
     vi, hs = get_vm_id(vm['Object Name'])
     if m['can_be_recovered'] == config['limit']:
-        return
-    if hs not in config['compute_cluster']:
         return
     if vi is None:
         logging.warning("{} - VM Not Found on Rubrik".format(vm['Object Name']))
@@ -130,8 +136,9 @@ def get_csv_data(f):
 
 # Get Datastore DICT
 def get_vm_structure():
+    os.makedirs('cache', exist_ok=True)
     try:
-        with open(config['vmw_cache_file']) as j:
+        with open(vmw_file) as j:
             h = json.load(j)
     except FileNotFoundError:
         h = {}
@@ -157,9 +164,10 @@ def get_vm_structure():
                 uri = ("{}{}/{}".format(random.choice(node_ips), call, response_details['id']))
                 request = requests.get(uri, headers=header, verify=False, timeout=15).json()
                 for response_datastores in request['datastores']:
-                    h[response['name']]['hosts'][response_details['name']]['datastores'][response_datastores['name']] = {
+                    h[response['name']]['hosts'][response_details['name']]['datastores'][
+                        response_datastores['name']] = {
                         'id': response_datastores['id']}
-        with open(config['vmw_cache_file'], 'w') as o:
+        with open(vmw_file, 'w') as o:
             json.dump(h, o)
     return h
 
@@ -193,8 +201,9 @@ def get_vdisk_id(v):
 
 # Grab the Datastore name from the VM Record
 def get_datastore_map():
+    os.makedirs('cache', exist_ok=True)
     try:
-        with open(config['ds_cache_file']) as j:
+        with open(ds_file) as j:
             dsm = json.load(j)
     except FileNotFoundError:
         dsm = {}
@@ -208,7 +217,7 @@ def get_datastore_map():
             if 'virtualDisks' in rr:
                 for vd in rr['virtualDisks']:
                     dsm[vd['id']] = z['name']
-        with open(config['ds_cache_file'], 'w') as o:
+        with open(ds_file, 'w') as o:
             json.dump(dsm, o)
     return dsm
 
@@ -235,12 +244,13 @@ def livemount_table():
     return lma
 
 
-def unmount_vm(v,vi):
+def unmount_vm(v, vi):
     c = "/api/v1/vmware/vm/snapshot/mount/"
     if vi in lmt:
         for si in lmt[vi]:
             u = ("{}{}{}".format(random.choice(node_ips), c, si))
             logging.info("{} - {} - {} - {}".format(v, 'Unmounting', vi, si))
+            m['successful_unmount'] += 1
             r = requests.delete(u, headers=header, verify=False, timeout=15).json()
     return
 
@@ -266,13 +276,14 @@ def livemount_vm(v, si):
         ls = r['status']
         if ls == "SUCCEEDED":
             logging.info(
-                "{} - {} - {} - {} - {} ".format(v, r['status'], r['nodeId'],  r['startTime'], r['endTime']))
-            m['successful_recovery'] += 1
+                "{} - {} - {} - {} - {} ".format(v, r['status'], r['nodeId'], r['startTime'], r['endTime']))
+            m['successful_livemount'] += 1
             s = True
         if "FAIL" in ls:
             logging.error("{} - Livemount Status - {} ({}) - Start ({}) - End ({})".format(v, r['status'], r['nodeId'],
-                                                                                        r['startTime'], r['endTime']))
-            m['failed_recovery'] += 1
+                                                                                           r['startTime'],
+                                                                                           r['endTime']))
+            m['failed_operations'] += 1
             s = True
         time.sleep(3)
     return
@@ -281,7 +292,7 @@ def livemount_vm(v, si):
 def export_vm(v, si, hi, di, h):
     c = "/api/v1/vmware/vm/snapshot"
     lo = {
-        "vmName": "{}{}".format(config['prefix'],v),
+        "vmName": "{}{}".format(config['prefix'], v),
         "disableNetwork": True,
         "removeNetworkDevices": False,
         "powerOn": False,
@@ -314,8 +325,8 @@ def export_vm(v, si, hi, di, h):
             s = True
         if "FAIL" in ls:
             logging.error("{} - Export Status - {} ({}) - Start ({}) - End ({})".format(v, r['status'], r['nodeId'],
-                                                                                       r['startTime'], r['endTime']))
-            m['failed_recovery'] += 1
+                                                                                        r['startTime'], r['endTime']))
+            m['failed_operations'] += 1
             s = True
         time.sleep(3)
     return
@@ -367,7 +378,6 @@ if config['function'] == 'export':
     vm_struc = get_vm_structure()
     print(" - Done")
 
-
     # Get datastore map
     print("Getting Datastore Map", end='')
     datastore_map = get_datastore_map()
@@ -375,7 +385,6 @@ if config['function'] == 'export':
 
 if config['function'] == 'unmount':
     lmt = livemount_table()
-
 
 # Grab recovery info from csv
 print("Getting Recovery Data", end='')
@@ -407,6 +416,7 @@ for h in recoveries:
 if config['debug']:
     from pyVim import connect
     from pyVmomi import vim
+
     for host_name in recoveries:
         # Log into the ESX Host
         service_instance = connect.SmartConnect(host=host_name,
@@ -445,11 +455,17 @@ if config['debug']:
                             samp += 1
                     calc = round(calc / samp)
                     logging.info("{} - {} - avg:{}{} max:{}{} samples:{} - experimental".format(host_mos.name,
-                                                                                                counters[val.id.counterId]['name'],
+                                                                                                counters[
+                                                                                                    val.id.counterId][
+                                                                                                    'name'],
                                                                                                 calc,
-                                                                                                counters[val.id.counterId]['unit'],
+                                                                                                counters[
+                                                                                                    val.id.counterId][
+                                                                                                    'unit'],
                                                                                                 metric_max,
-                                                                                                counters[val.id.counterId]['unit'],
+                                                                                                counters[
+                                                                                                    val.id.counterId][
+                                                                                                    'unit'],
                                                                                                 samp))
         connect.Disconnect(service_instance)
 exit()
