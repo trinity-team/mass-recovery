@@ -71,8 +71,8 @@ fileserver-005
 fileserver-006
 ```
 - Object Name is not optional
-- Header row for used fields are not optional
-- Undefined Cluster/Datastore will us last known locations
+- Header row for columns used are not optional
+- Undefined Cluster/Datastore will use last known locations
 
 ## Recommended Configuration Changes
 ### ESX Hosts 
