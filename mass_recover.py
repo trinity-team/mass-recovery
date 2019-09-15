@@ -5,14 +5,18 @@ import random
 import csv
 import urllib.parse
 import logging
-import datetime
+import pprint
 import json
 import os
 import statistics
-import gc
+import pytz
 from timeit import default_timer as timer
 from multiprocessing.pool import ThreadPool
+from dateutil.parser import parse
+from datetime import datetime
+from gc import collect as gc
 import urllib3
+pp = pprint.PrettyPrinter(indent=4)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 config = json.load(open(sys.argv[1]))
@@ -21,6 +25,9 @@ if 'debug' not in config:
 
 if 'max_hosts' not in config:
     config['max_hosts'] = 0
+
+if 'limit' not in config:
+    config['limit'] = 0
 
 sla = "Bronze"
 rn = {}
@@ -56,7 +63,7 @@ m = {
 recoveries = {}
 
 start = timer()
-startTime = datetime.datetime.now()
+startTime = datetime.now()
 
 # Use Token Auth Headers
 auth_header = 'Bearer ' + config['rubrik_key']
@@ -69,10 +76,11 @@ def progress(c, t, s=''):
     fl = int(round(bl * c / float(t)))
     p = round(100.0 * c / float(t), 1)
     b = '=' * fl + '-' * (bl - fl)
-    sys.stdout.write('[%s] %s%s (%s)\r' % (b, p, '%', s))
-    sys.stdout.flush()
-    if c == t:
+    if 'show_progress' in config and config['show_progress']:
+        sys.stdout.write('[%s] %s%s (%s)\r' % (b, p, '%', s))
         sys.stdout.flush()
+        if c == t:
+            sys.stdout.flush()
 
 
 # Threader
@@ -91,19 +99,20 @@ def run_assessment_threads(v, t):
 # Worker Process
 def run_assessment_process(vm):
     b = timer()
-    vi, hs = get_vm_id(vm['Object Name'])
-    if m['can_be_recovered'] == config['limit']:
-        return
-    if vi is None:
+    vid = get_vm_id(vm['Object Name'])
+    if vid is None:
         logging.warning("{} - VM Not Found on Rubrik".format(
             vm['Object Name']))
         m['vm_not_found'] += 1
         return
-    si = get_snapshot_id(vi)
+    si, vi = get_snapshot_id(vid)
+    hs = vid[vi]
     if si is None:
         logging.warning("{} - Snapshot not found for VM".format(
             vm['Object Name']))
         m['snap_not_found'] += 1
+        return
+    if config['function'] == 'dryrun':
         return
     m['can_be_recovered'] += 1
     if config['function'] == 'livemount':
@@ -111,8 +120,7 @@ def run_assessment_process(vm):
     elif config['function'] == 'unmount':
         unmount_vm(vm['Object Name'], vi)
     elif config['function'] == 'export':
-        if ('ESX Cluster' not in vm) or (vm['ESX Cluster'] == '') or (
-                vm['ESX Cluster'] is None):
+        if ('ESX Cluster' not in vm) or (vm['ESX Cluster'] == '') or (vm['ESX Cluster'] is None):
             vm['ESX Cluster'] = hs
         if len(recoveries) <= (config['max_hosts'] - 1):
             h = random.choice(list(vm_struc[vm['ESX Cluster']]['hosts']))
@@ -127,13 +135,22 @@ def run_assessment_process(vm):
             recoveries[h] += 1
         di = (vm_struc[vm['ESX Cluster']]['hosts'][h]['datastores'][
             vm['Datastore']]['id'])
+        if di is None:
+            logging.error("{} - No Datastore found in cache".format(
+                vm['Object Name']))
+            m['failed_operations'] += 1
+            return
         logging.info("{} - Export {} to {} (disk {})".format(
             vm['Object Name'], si, h, di))
         hi = (vm_struc[vm['ESX Cluster']]['hosts'][h]['id'])
-        export_vm(vm['Object Name'], si, hi, di, h)
+        try:
+            export_vm(vm['Object Name'], si, hi, di, h)
+        except Exception as e:
+            m['failed_operations'] += 1
+            logging.error(e)
     f = timer()
     kpi.append(f - b)
-    gc.collect()
+    gc()
 
 
 # Returns OK Rubrik Nodes
@@ -199,9 +216,9 @@ def get_vm_structure():
                 for response_datastores in request['datastores']:
                     h[response['name']]['hosts'][
                         response_details['name']]['datastores'][
-                            response_datastores['name']] = {
-                                'id': response_datastores['id']
-                            }
+                        response_datastores['name']] = {
+                        'id': response_datastores['id']
+                    }
         with open(vmw_file, 'w') as o:
             json.dump(h, o)
     return h
@@ -243,12 +260,12 @@ def get_datastore_map():
         dsm = {}
         c = "/api/internal/vmware/datastore"
         u = ("{}{}".format(random.choice(node_ips), c))
-        r = requests.get(u, headers=header, verify=False, timeout=15).json()
+        r = requests.get(u, headers=header, verify=False, timeout=30).json()
         for z in r['data']:
             cc = "/api/internal/vmware/datastore/"
             uu = ("{}{}{}".format(random.choice(node_ips), cc, z['id']))
             rr = requests.get(uu, headers=header, verify=False,
-                              timeout=30).json()
+                              timeout=60).json()
             if 'virtualDisks' in rr:
                 for vd in rr['virtualDisks']:
                     dsm[vd['id']] = z['name']
@@ -263,9 +280,11 @@ def get_vm_id(v):
     u = ("{}{}?name={}".format(random.choice(node_ips), c,
                                urllib.parse.quote(v)))
     r = requests.get(u, headers=header, verify=False, timeout=15).json()
+    o = {}
     for response in r['data']:
         if response['name'] == v:
-            return response['id'], response['infraPath'][-2]['name']
+            o[response['id']] = response['clusterName']
+    return o
 
 
 def livemount_table():
@@ -317,8 +336,8 @@ def livemount_vm(v, si):
         if "FAIL" in ls:
             logging.error(
                 "{} - Livemount Status - {} ({}) - Start ({}) - End ({})".
-                format(v, r['status'], r['nodeId'], r['startTime'],
-                       r['endTime']))
+                    format(v, r['status'], r['nodeId'], r['startTime'],
+                           r['endTime']))
             m['failed_operations'] += 1
             s = True
         time.sleep(3)
@@ -328,16 +347,19 @@ def livemount_vm(v, si):
 def export_vm(v, si, hi, di, h):
     c = "/api/v1/vmware/vm/snapshot"
     lo = {
-        "vmName": "{}{}".format(config['prefix'], v),
         "disableNetwork": True,
         "removeNetworkDevices": False,
         "powerOn": False,
-        "keepMacAddresses": False,
+        "keepMacAddresses": True,
         "hostId": "{}".format(hi),
         "datastoreId": "{}".format(di),
         "unregisterVm": False,
         "shouldRecoverTags": True
     }
+    if 'prefix' in config:
+        lo['vmName'] = "{}{}".format(config['prefix'], v)
+    else:
+        lo['vmName'] = "{}".format(v)
     u = ("{}{}/{}/export".format(random.choice(node_ips), c, si))
     r = requests.post(u, json=lo, headers=header, verify=False,
                       timeout=15).json()
@@ -368,15 +390,31 @@ def export_vm(v, si, hi, di, h):
     return
 
 
-# Returns latest snap_id from vm_id
-def get_snapshot_id(i):
-    c = "/api/v1/vmware/vm/"
-    u = ("{}{}{}".format(random.choice(node_ips), c, urllib.parse.quote(i)))
-    r = requests.get(u, headers=header, verify=False, timeout=15).json()
-    if r['snapshotCount'] > 0:
-        return r['snapshots'][0]['id']
+# Returns latest snap_id from vm_id - if config['recovery_point'] then find closest to time without going over
+# 2019-09-15T07:02:54.470Z
+def get_snapshot_id(vin):
+    myrc = {}
+    if 'recovery_point' in config:
+        mrp = pytz.utc.localize(parse(config['recovery_point']))
     else:
-        return
+        mrp = datetime.now()
+    for v in vin:
+        c = "/api/v1/vmware/vm/"
+        u = ("{}{}{}".format(random.choice(node_ips), c, urllib.parse.quote(v)))
+        r = requests.get(u, headers=header, verify=False, timeout=15).json()
+        if r['snapshotCount'] > 0:
+            for snap in r['snapshots']:
+                dt = parse(snap['date'])
+                if mrp > dt:
+                    diff = abs(mrp - dt)
+                    myrc[diff] = {}
+                    myrc[diff]['id'] = snap['id']
+                    myrc[diff]['dt'] = snap['date']
+                    myrc[diff]['vmid'] = v
+    close = min(myrc)
+    logging.info(
+        "{} - Recovery Point Found - Snap {} - RP {})".format(r['name'], myrc[close]['dt'], mrp))
+    return myrc[close]['id'], myrc[close]['vmid']
 
 
 def print_m(m):
@@ -440,7 +478,7 @@ if config['function'] == 'unmount':
 # Grab recovery info from csv
 print("Getting Recovery Data", end='')
 data = get_csv_data(config['in_file'])
-if config['limit']:
+if config['limit'] > 0:
     data = data[0:config['limit']]
 print(" - Done")
 
@@ -452,7 +490,7 @@ end = timer()
 progress(len(data), len(data), "Completed in {} seconds".format(end - start))
 m['time_elapsed'] = round(end - start, 3)
 m['start_time'] = startTime
-endTime = datetime.datetime.now()
+endTime = datetime.now()
 m['end_time'] = endTime
 
 print_m(m)
@@ -477,8 +515,8 @@ if config['debug']:
         counters = {}
         # Assemble a hash of details for the counters
         for ct in perfManager.perfCounter:
-            cfn = ct.groupInfo.key + "." + ct.nameInfo.key + /
-            "." + ct.rollupType
+            cfn = ct.groupInfo.key + "." + ct.nameInfo.key + \
+                "." + ct.rollupType
             counters[ct.key] = {}
             counters[ct.key]['name'] = cfn
             counters[ct.key]['unit'] = ct.unitInfo.label
@@ -498,8 +536,8 @@ if config['debug']:
         # Figure out what to log
         for val in q[0].value:
             if "net.bytes" in counters[
-                    val.id.counterId]['name'] or "net.usage" in counters[
-                        val.id.counterId]['name']:
+                val.id.counterId]['name'] or "net.usage" in counters[
+                val.id.counterId]['name']:
                 calc = 0
                 samp = 0
                 metric_max = 0
@@ -513,10 +551,9 @@ if config['debug']:
                     calc = round(calc / samp)
                     logging.info(
                         "{} - {} - avg:{}{} max:{}{} samples:{} - experimental"
-                        .format(host_mos.name,
-                                counters[val.id.counterId]['name'], calc,
-                                counters[val.id.counterId]['unit'], metric_max,
-                                counters[val.id.counterId]['unit'], samp))
+                            .format(host_mos.name,
+                                    counters[val.id.counterId]['name'], calc,
+                                    counters[val.id.counterId]['unit'], metric_max,
+                                    counters[val.id.counterId]['unit'], samp))
         connect.Disconnect(service_instance)
 exit()
-
