@@ -397,7 +397,7 @@ def get_snapshot_id(vin):
     if 'recovery_point' in config:
         mrp = pytz.utc.localize(parse(config['recovery_point']))
     else:
-        mrp = datetime.now()
+        mrp = pytz.utc.localize(datetime.now())
     for v in vin:
         c = "/api/v1/vmware/vm/"
         u = ("{}{}{}".format(random.choice(node_ips), c, urllib.parse.quote(v)))
