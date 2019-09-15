@@ -21,6 +21,8 @@
   "function": 'livemount',
   "rubrik_host": "172.21.8.33",
   "rubrik_key": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI5ZDFkYjQ2Yi1iYmEzLTRkMGItYjc5ZC01OGZiYWE4ZTgzOWIiLCJpc3MiOiJlNjY3ZWY4Yi01Y2E2LTQ1OTYtYjBhMi1jMjZjNzVhMGMzMjYiLCJqdGkiOiIxNTgyNzdlZS00M2M0LTRlODYtYjU4NC0xMzA0ZmY3OTI1ZmIifQ.9pAudx3eXYAoe9l2Y_9Qy64FldED9EeGHErE4823EAM",
+  "recovery_point": "2019-09-10 21:45:47",
+  "show_progress": true,
   "prefix": "pm-test_",
   "max_hosts": 3,
   "omit_hosts": ["poc-esx06.rangers.lab"],
@@ -32,7 +34,7 @@
 ### Mandatory Configuration -
 - threads (int) - number of simultaneous operations
 - in_file (str) - relative path to input file
-- function (str) - one of - export/livemount/unmount 
+- function (str) - one of - export/livemount/unmount/dryrun 
 - rubrik_host (str) - ip/fqdn of Rubrik node
 - rubrik_key (str) - api token for Rubrik 
 
@@ -43,6 +45,8 @@
 ### Optional Configuration
 - limit (int) - how many records to use from input file, useful for testing
 - omit_hosts (arr/str) - esx hosts that we don't want to export to
+- show_progress - set to true to have an idea of progress
+- recovery_point - set to date in order to recover latest RP up to that point in time
 
 ### Super Experimental Configuration (Requires pyvmomi)
 - debug (bool) - Turn on ESX Counter retrieval
