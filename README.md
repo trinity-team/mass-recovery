@@ -45,7 +45,8 @@
 ### Optional Configuration
 - limit (int) - how many records to use from input file, useful for testing
 - omit_hosts (arr/str) - esx hosts that we don't want to export to
-- show_progress - set to true to have an idea of progress
+- show_progress (bool) - set to true to have an idea of progress
+- svm (bool) - set with livemount so that we sVM machines upon mount to original datastore
 - recovery_point - set to date in order to recover latest RP up to that point in time
 
 ### Super Experimental Configuration (Requires pyvmomi)
@@ -77,6 +78,8 @@ fileserver-006
 - Object Name is not optional
 - Header row for columns used are not optional
 - Undefined Cluster/Datastore will use last known locations
+- VMware and Datastore data is cached locally, in the event that 
+  recoveries DO NOT kick off, delete the cache/*.ds file and rerun.
 
 ## Recommended Configuration Changes
 ### ESX Hosts 
