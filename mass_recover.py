@@ -12,7 +12,6 @@ import statistics
 import pytz
 from timeit import default_timer as timer
 from multiprocessing.pool import ThreadPool
-from multiprocessing import Process
 from threading import Thread
 import threading
 from queue import Queue
@@ -70,7 +69,7 @@ m = {
     "successful_unmount": 0,
     "failed_operations": 0,
     "max_hosts": config['max_hosts'],
-    "thread_count": config['function_threads']
+    "function_threads": config['function_threads']
 }
 
 recoveries = {}
@@ -362,43 +361,53 @@ def relocate_vm(vm):
             print(e)
         m['active_svm'] -= 1
 
+
 def livemount_vm(v, si):
-    c = "/api/v1/vmware/vm/snapshot"
-    lo = {
-        "disableNetwork": True,
-        "removeNetworkDevices": False,
-        "powerOn": True,
-    }
-    u = ("{}{}/{}/mount".format(random.choice(node_ips), c, si))
-    r = requests.post(u, json=lo, headers=header, verify=False,
-                      timeout=15).json()
-    t = r['id']
-    s = False
-    while not s:
-        c = "/api/v1/vmware/vm/request"
-        u = ("{}{}/{}".format(random.choice(node_ips), c, t))
-        r = requests.get(u, headers=header, verify=False, timeout=15).json()
-        ls = r['status']
-        if ls == "SUCCEEDED":
-            logging.info("{} - {} - {} - {} - {} ".format(
-                v, r['status'], r['nodeId'], r['startTime'], r['endTime']))
-            m['successful_livemount'] += 1
-            if config['svm']:
-                for i in r['links']:
-                    if i['rel'] == 'result':
-                        o = requests.get(i['href'], headers=header, verify=False, timeout=15).json()
-                        return o['id'], o['mountedVmId']
-            s = True
-            return 1
-        if "FAIL" in ls:
-            logging.error(
-                "{} - Livemount Status - {} ({}) - Start ({}) - End ({})".
-                    format(v, r['status'], r['nodeId'], r['startTime'],
-                           r['endTime']))
-            logging.error(r['error'])
-            m['failed_operations'] += 1
-            s = True
-        time.sleep(3)
+    complete = False
+    while not complete:
+        c = "/api/v1/vmware/vm/snapshot"
+        lo = {
+            "disableNetwork": True,
+            "removeNetworkDevices": False,
+            "powerOn": True,
+        }
+        u = ("{}{}/{}/mount".format(random.choice(node_ips), c, si))
+        r = requests.post(u, json=lo, headers=header, verify=False,
+                          timeout=15).json()
+        t = r['id']
+        s = False
+        while not s:
+            c = "/api/v1/vmware/vm/request"
+            u = ("{}{}/{}".format(random.choice(node_ips), c, t))
+            r = requests.get(u, headers=header, verify=False, timeout=15).json()
+            ls = r['status']
+            if ls == "SUCCEEDED":
+                logging.info("{} - {} - {} - {} - {} ".format(
+                    v, r['status'], r['nodeId'], r['startTime'], r['endTime']))
+                m['successful_livemount'] += 1
+                if config['svm']:
+                    for i in r['links']:
+                        if i['rel'] == 'result':
+                            o = requests.get(i['href'], headers=header, verify=False, timeout=15).json()
+                            return o['id'], o['mountedVmId']
+                s = True
+                return 1
+            if "FAIL" in ls:
+                if 'Failed to create NAS datastore' in json.dumps(r['error']):
+                    time.sleep(20)
+                    if config['nfs_wait']:
+                        complete = False
+                        r['status'] = "WAIT"
+                else:
+                    m['failed_operations'] += 1
+                    logging.error(r['error'])
+                    complete = True
+                logging.error(
+                    "{} - Livemount Status - {} ({}) - Start ({}) - End ({})".
+                        format(v, r['status'], r['nodeId'], r['startTime'],
+                               r['endTime']))
+                s = True
+            time.sleep(3)
     return 0
 
 
@@ -498,16 +507,6 @@ def print_m(m):
         logging.info("{} : {}".format('Max', mx))
 
 
-def get_objs(c, t, f=None, r=True):
-    if not f:
-        f = c.rootFolder
-    obj = {}
-    container = c.viewManager.CreateContainerView(f, t, r)
-    for managed_object_ref in container.view:
-        obj.update({managed_object_ref: managed_object_ref.name})
-    return obj
-
-
 if __name__ == '__main__':
     # Get Rubrik Nodes so we can thread against them
     print("Getting Rubrik Node Information", end='')
@@ -562,18 +561,17 @@ if __name__ == '__main__':
             s = "Storage vMotion: ({} Complete,  {} Running,  {} Queued)".format(m['successful_relocate'], m['active_svm'], svm_vm.qsize())
             sys.stdout.write(s + "\r")
             sys.stdout.flush()
-            time.sleep(5)
-        if svm_vm.empty():
-            s = "Storage vMotion: ({} Complete,  {} Running,  {} Queued)".format(m['successful_relocate'], m['active_svm'], svm_vm.qsize())
-            sys.stdout.write(s)
-            sys.stdout.flush()
-        svm_vm.task_done()
+            time.sleep(1)
+        #svm_vm.task_done()
 
-        print('')
         for s in svm_threads:
             s.join()
 
 #        run_threads(svm_vm, config['threads'], relocate_vm)
+        if svm_vm.empty():
+            s = "Storage vMotion: ({} Complete,  {} Running,  {} Queued)".format(m['successful_relocate'], m['active_svm'], svm_vm.qsize())
+            sys.stdout.write(s + "\n")
+            print("Relocation Complete")
 
     print_m(m)
 

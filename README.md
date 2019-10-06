@@ -1,4 +1,12 @@
 # mass-recovery
+Allows a user to mass-recover from Rubrik and caters to various recovery types.
+
+- Export
+- Livemount
+- Unmount
+- Livemount with SVM (Independent queues, fails on VMware NFS limit)
+- Livemount with SVM (Queued if VMware NFS limit is hit)
+  
 ## Requires
 - python3
 - requests
@@ -10,6 +18,15 @@
 ./mass_recover.py [config_file]
 ```
 
+## Console output with show_progress
+```
+Getting Rubrik Node Information - Done
+Getting VMware Structures - Done
+Getting Datastore Map - Done
+Getting Recovery Data - Done
+Running Recovery
+[==========================----------------------------------] 44.0% (44 of 100) Storage vMotion (37 Complete,  2 Running,  5 Queued)
+```
 
 ## Configuration File
 
@@ -23,12 +40,11 @@
   "rubrik_key": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI5ZDFkYjQ2Yi1iYmEzLTRkMGItYjc5ZC01OGZiYWE4ZTgzOWIiLCJpc3MiOiJlNjY3ZWY4Yi01Y2E2LTQ1OTYtYjBhMi1jMjZjNzVhMGMzMjYiLCJqdGkiOiIxNTgyNzdlZS00M2M0LTRlODYtYjU4NC0xMzA0ZmY3OTI1ZmIifQ.9pAudx3eXYAoe9l2Y_9Qy64FldED9EeGHErE4823EAM",
   "recovery_point": "2019-09-10 21:45:47",
   "show_progress": true,
+  "svm": true,
+  "svm_threads": 8,
+  "nfs_wait": 3,
   "prefix": "pm-test_",
   "max_hosts": 3,
-  "omit_hosts": ["poc-esx06.rangers.lab"],
-  "debug": false,
-  "esx_user": "user",
-  "esx_pass": "password"
 }
 ```
 ### Mandatory Configuration -
@@ -46,14 +62,10 @@
 - limit (int) - how many records to use from input file, useful for testing
 - omit_hosts (arr/str) - esx hosts that we don't want to export to
 - show_progress (bool) - set to true to have an idea of progress
+- nfs_wait (bool) - wait for NFS datastore availablity (play nice with vmware)
 - svm (bool) - set with livemount so that we sVM machines upon mount to original datastore
 - svm_threads (int) - set with livemount to put a concurrency on running sVM 
 - recovery_point - set to date in order to recover latest RP up to that point in time
-
-### Super Experimental Configuration (Requires pyvmomi)
-- debug (bool) - Turn on ESX Counter retrieval
-- esx_user (str) - ESX username
-- esx_pass (str) - ESX password
 
 ## Input File
 ### Example 1
