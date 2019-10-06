@@ -47,7 +47,8 @@ svm_vm = {}
 timestr = time.strftime("%Y%m%d-%H%M%S")
 d = "{}_{}_{}".format(config['function_threads'], config['max_hosts'], config['limit'])
 
-kpi = []
+kpi_function = []
+kpi_svm = []
 
 vmw_file = 'cache/{}.vmw'.format(config['rubrik_host'])
 ds_file = 'cache/{}.ds'.format(config['rubrik_host'])
@@ -59,7 +60,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-track = {}
+#track = {}
 
 m = {
     "snap_not_found": 0,
@@ -142,11 +143,12 @@ def run_function(vm):
         if config['svm']:
             ds = get_vdisk_id(vi)
             di = datastore_map[ds]
-            logging.info("{} - Queue sVM {} to {} (disk {})".format(vm['Object Name'], mount_id, di[0], di[1]))
+            logging.info("{} - SVM QUEUED to {}".format(vm['Object Name'], di[1]))
             svm_obj['datastoreName'] = di[0]
             svm_obj['datastoreId'] = di[1]
             svm_obj['vmId'] = mounted_vm_id
             svm_obj['mountId'] = mount_id
+            svm_obj['vmName'] = vm['Object Name']
             svm_vm.put(svm_obj)
     elif config['function'] == 'unmount':
         unmount_vm(vm['Object Name'], vi)
@@ -163,7 +165,7 @@ def run_function(vm):
                 vm['Object Name']))
             m['failed_operations'] += 1
             return
-        logging.info("{} - Export {} to {} (disk {})".format(
+        logging.info("{} - EXPORT {} to {} (disk {})".format(
             vm['Object Name'], si, h, di))
         hi = (vm_struc[vm['ESX Cluster']]['hosts'][h]['id'])
         if h not in recoveries:
@@ -177,7 +179,7 @@ def run_function(vm):
             logging.error(e)
             print("Export failed - " + e)
     f = timer()
-    kpi.append(f - b)
+    kpi_function.append(f - b)
     gc()
 
 
@@ -320,7 +322,7 @@ def unmount_vm(v, vi):
     if vi in lmt:
         for si in lmt[vi]:
             u = ("{}{}{}".format(random.choice(node_ips), c, si))
-            logging.info("{} - {} - {} - {}".format(v, 'Unmounting', vi, si))
+            logging.info("{} - UNMOUNT - {} - {}".format(v, vi, si))
             m['successful_unmount'] += 1
             requests.delete(u, headers=header, verify=False, timeout=15).json()
     return
@@ -330,6 +332,7 @@ def relocate_vm(vm):
     run = True
     while run:
         svm_object = dict(vm.get(block=True))
+        svm_start = timer()
         try:
             c = "/api/v1/vmware/vm/snapshot/mount"
             lo = {
@@ -349,12 +352,12 @@ def relocate_vm(vm):
                         if t == result['jobInstanceId']:
                             if result['eventStatus'] == "Success":
                                 logging.info(
-                                    "{} - Successful sVM {} to {}".format(svm_object['vmId'], svm_object, svm_object['datastoreName']))
+                                    "{} - SVM SUCCEED - to {}".format(svm_object['vmName'], svm_object['datastoreName']))
                                 m['successful_relocate'] += 1
                                 s = True
                             elif "Fail" in result['eventStatus']:
                                 logging.error(
-                                    "{} - Failed sVM {} to {}".format(svm_object['vmId'], svm_object['mountId'], svm_object['datastoreName']))
+                                    "{} - SVM FAIL {} to {}".format(svm_object['vmName'], svm_object['datastoreName']))
                                 m['failed_relocate'] += 1
                                 s = True
                     time.sleep(3)
@@ -364,6 +367,8 @@ def relocate_vm(vm):
                 run = False
         except Exception as e:
             print(e)
+        svm_end = timer()
+        kpi_svm.append(svm_end - svm_start)
         m['active_svm'] -= 1
 
 
@@ -387,7 +392,7 @@ def livemount_vm(v, si):
             r = requests.get(u, headers=header, verify=False, timeout=15).json()
             ls = r['status']
             if ls == "SUCCEEDED":
-                logging.info("{} - {} - {} - {} - {} ".format(
+                logging.info("{} - LM {} - {} - {} - {} ".format(
                     v, r['status'], r['nodeId'], r['startTime'], r['endTime']))
                 m['successful_livemount'] += 1
                 if config['svm']:
@@ -412,7 +417,7 @@ def livemount_vm(v, si):
                     logging.error(r['error'])
                     complete = True
                 logging.error(
-                    "{} - Livemount Status - {} ({}) - Start ({}) - End ({})".
+                    "{} - LM {} ({}) - Start ({}) - End ({})".
                         format(v, r['status'], r['nodeId'], r['startTime'],
                                r['endTime']))
                 s = True
@@ -449,8 +454,8 @@ def export_vm(v, si, hi, di, h):
         r = requests.get(u, headers=header, verify=False, timeout=15).json()
         ls = r['status']
         if ls == "SUCCEEDED":
-            logging.info("{} - {} - {} - {} - {} - {}".format(
-                v, r['status'], r['nodeId'], h, r['startTime'], r['endTime']))
+            logging.info("{} - EXPORT SUCCEED - {} - {} - {} - {} - {}".format(
+                v, r['nodeId'], h, r['startTime'], r['endTime']))
             if r['nodeId'] not in rn:
                 rn[r['nodeId']] = 1
             else:
@@ -459,8 +464,9 @@ def export_vm(v, si, hi, di, h):
             s = True
         if "FAIL" in ls:
             logging.error(
-                "{} - Export Status - {} ({}) - Start ({}) - End ({})".format(
-                    v, r['status'], r['nodeId'], r['startTime'], r['endTime']))
+                "{} - Export FAIL - {} ({}) - Start ({}) - End ({})".format(
+                    v, r['nodeId'], r['startTime'], r['endTime']))
+            logging.error(r['error'])
             m['failed_operations'] += 1
             s = True
         time.sleep(5)
@@ -490,7 +496,7 @@ def get_snapshot_id(vin):
                     myrc[diff]['vmid'] = v
     close = min(myrc)
     logging.info(
-        "{} - Recovery Point Found - Snap {} - RP {})".format(r['name'], myrc[close]['dt'], mrp))
+        "{} - RP SUCCEED - Snap {} - RP {})".format(r['name'], myrc[close]['dt'], mrp))
     return myrc[close]['id'], myrc[close]['vmid']
 
 
@@ -500,20 +506,19 @@ def print_m(m):
         if m[i] != 0:
             print("\t {} : {}".format(i.replace('_', ' ').title(), m[i]))
             logging.info("{} : {}".format(i.replace('_', ' ').title(), m[i]))
-    if kpi:
-        median = round(statistics.median_high(kpi), 3)
-        mean = round(statistics.mean(kpi), 3)
-        mn = round(min(kpi), 3)
-        mx = round(max(kpi), 3)
-        print("Operation Stats:")
-        print("\t {} : {}".format('Median', median))
-        logging.info("{} : {}".format('Median', median))
-        print("\t {} : {}".format('Mean', mean))
-        logging.info("{} : {}".format('Mean', mean))
-        print("\t {} : {}".format('Min', mn))
-        logging.info("{} : {}".format('Min', mn))
-        print("\t {} : {}".format('Max', mx))
-        logging.info("{} : {}".format('Max', mx))
+
+    for i in ['kpi_function', 'kpi_svm']:
+        if eval(i):
+            kpi = eval(i)
+            c = {'median': round(statistics.median_high(kpi), 3),
+                 'mean': round(statistics.mean(kpi), 3),
+                 'min': round(min(kpi), 3),
+                 'max': round(max(kpi), 3)}
+            print("Per Operation Stats for {}:".format(i.replace('kpi_', '').title()))
+            logging.info("Per Operation Stats for {}:".format(i.replace('kpi_', '').title()))
+            for o in c:
+                print("\t {} : {}".format(o.title(), c[o]))
+                logging.info("{} : {}".format(o.title(), c[o]))
 
 
 if __name__ == '__main__':
@@ -557,7 +562,7 @@ if __name__ == '__main__':
     print("Running Recovery")
     run_threads(data, config['function_threads'], run_function)
     end = timer()
-    progress(len(data), len(data), "Completed in {} seconds                                              ".format(end - start))
+    progress(len(data), len(data), "Completed in {} seconds                                              ".format(round(end - start, 3)))
     m['time_elapsed'] = round(end - start, 3)
     m['start_time'] = startTime
     endTime = datetime.now()
@@ -575,7 +580,6 @@ if __name__ == '__main__':
         for s in svm_threads:
             s.join()
 
-#        run_threads(svm_vm, config['threads'], relocate_vm)
         if svm_vm.empty():
             s = "Storage vMotion: ({} Complete,  {} Running,  {} Queued)".format(m['successful_relocate'], m['active_svm'], svm_vm.qsize())
             sys.stdout.write(s + "\n")

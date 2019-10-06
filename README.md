@@ -63,6 +63,7 @@ Running Recovery
 - omit_hosts (arr/str) - esx hosts that we don't want to export to
 - show_progress (bool) - set to true to have an idea of progress
 - nfs_wait (bool) - wait for NFS datastore availablity (play nice with vmware)
+    Note: This will show a failure in vCenter with a subsequent success.
 - svm (bool) - set with livemount so that we sVM machines upon mount to original datastore
 - svm_threads (int) - set with livemount to put a concurrency on running sVM 
 - power_on (bool) - set to power machines on upon exposure to vSphere
@@ -132,70 +133,103 @@ logs/mass_[function]_[time-stamp]_[threads]_[max_hosts]_[limit]
 <p>
 
 ```
-2019-08-29 19:12:54,420 - root - INFO - fileserver-002 - Export 05fe6f2d-21f4-45f3-b1bb-d7f51c3dc529 to poc-esx03.rangers.lab
-2019-08-29 19:12:54,432 - root - INFO - fileserver-004 - Export 9a3a27ae-2bc7-4903-a306-4ec641a965bf to poc-esx05.rangers.lab
-2019-08-29 19:12:54,448 - root - INFO - fileserver-005 - Export e419e7af-7735-4d48-a930-f83d5eac6c81 to poc-esx03.rangers.lab
-2019-08-29 19:12:54,460 - root - INFO - fileserver-006 - Export f58aa17d-a980-41ec-8d6a-68dcb2dda28a to poc-esx05.rangers.lab
-2019-08-29 19:12:54,475 - root - INFO - fileserver-003 - Export ebf43d9f-f6a8-427c-998d-75b98563664a to poc-esx03.rangers.lab
-2019-08-29 19:12:54,682 - root - INFO - fileserver-001 - Export a4f010b0-4b16-42d4-8639-c210547185f6 to poc-esx05.rangers.lab
-2019-08-29 19:12:55,567 - root - INFO - fileserver-005 - Export Status - RUNNING
-2019-08-29 19:12:55,585 - root - INFO - fileserver-004 - Export Status - RUNNING
-2019-08-29 19:12:55,588 - root - INFO - fileserver-006 - Export Status - RUNNING
-2019-08-29 19:12:55,591 - root - INFO - fileserver-003 - Export Status - RUNNING
-2019-08-29 19:12:55,595 - root - INFO - fileserver-002 - Export Status - RUNNING
-2019-08-29 19:12:55,778 - root - INFO - fileserver-001 - Export Status - RUNNING
-2019-08-29 19:27:05,675 - root - INFO - fileserver-001 - Export Status - SUCCEEDED
-2019-08-29 19:27:05,675 - root - INFO - fileserver-001 - SUCCEEDED - cluster:::RVM15CS006261 - poc-esx05.rangers.lab - 2019-08-29T23:12:59.967Z - 2019-08-29T23:27:08.742Z
-2019-08-29 19:27:11,604 - root - INFO - fileserver-007 - Export 3efdc0ca-5658-4bfd-83ad-2110565050ed to poc-esx03.rangers.lab
-2019-08-29 19:27:12,714 - root - INFO - fileserver-007 - Export Status - RUNNING
-2019-08-29 19:27:33,432 - root - INFO - fileserver-002 - Export Status - SUCCEEDED
-2019-08-29 19:27:33,433 - root - INFO - fileserver-002 - SUCCEEDED - cluster:::RVM15CS006261 - poc-esx03.rangers.lab - 2019-08-29T23:12:59.708Z - 2019-08-29T23:27:35.108Z
-2019-08-29 19:27:39,225 - root - INFO - fileserver-008 - Export 0ca82625-6344-402f-a36b-b778817954c1 to poc-esx05.rangers.lab
-2019-08-29 19:27:40,380 - root - INFO - fileserver-008 - Export Status - RUNNING
-2019-08-29 19:27:57,113 - root - INFO - fileserver-004 - Export Status - SUCCEEDED
-2019-08-29 19:27:57,113 - root - INFO - fileserver-004 - SUCCEEDED - cluster:::RVM15CS005956 - poc-esx05.rangers.lab - 2019-08-29T23:12:59.714Z - 2019-08-29T23:28:00.672Z
-2019-08-29 19:27:57,662 - root - INFO - fileserver-006 - Export Status - SUCCEEDED
-2019-08-29 19:27:57,662 - root - INFO - fileserver-006 - SUCCEEDED - cluster:::RVM15CS005955 - poc-esx05.rangers.lab - 2019-08-29T23:12:59.722Z - 2019-08-29T23:27:59.420Z
-2019-08-29 19:28:02,966 - root - INFO - fileserver-009 - Export c6662e93-3fcb-4cda-a88e-525eef829459 to poc-esx03.rangers.lab
-2019-08-29 19:28:03,366 - root - INFO - fileserver-010 - Export 7a0e3c63-8fb0-4412-9470-294fe8355261 to poc-esx05.rangers.lab
-2019-08-29 19:28:04,110 - root - INFO - fileserver-009 - Export Status - RUNNING
-2019-08-29 19:28:04,454 - root - INFO - fileserver-010 - Export Status - RUNNING
-2019-08-29 19:28:23,377 - root - INFO - fileserver-005 - Export Status - SUCCEEDED
-2019-08-29 19:28:23,377 - root - INFO - fileserver-005 - SUCCEEDED - cluster:::RVM15CS005956 - poc-esx03.rangers.lab - 2019-08-29T23:12:59.714Z - 2019-08-29T23:28:26.249Z
-2019-08-29 19:28:24,069 - root - INFO - fileserver-003 - Export Status - SUCCEEDED
-2019-08-29 19:28:24,070 - root - INFO - fileserver-003 - SUCCEEDED - cluster:::RVM15CS005955 - poc-esx03.rangers.lab - 2019-08-29T23:12:59.750Z - 2019-08-29T23:28:27.057Z
-2019-08-29 19:28:29,090 - root - INFO - fileserver-011 - Export ced6d49f-1d5b-4a5b-a3d2-3b235ec58054 to poc-esx03.rangers.lab
-2019-08-29 19:28:29,837 - root - INFO - fileserver-012 - Export 4bbb20f1-d841-4c1a-926a-9380ab3b9ba4 to poc-esx05.rangers.lab
-2019-08-29 19:28:30,247 - root - INFO - fileserver-011 - Export Status - RUNNING
-2019-08-29 19:28:30,927 - root - INFO - fileserver-012 - Export Status - RUNNING
-2019-08-29 19:42:49,269 - root - INFO - fileserver-007 - Export Status - SUCCEEDED
-2019-08-29 19:42:49,269 - root - INFO - fileserver-007 - SUCCEEDED - cluster:::RVM15CS006048 - poc-esx03.rangers.lab - 2019-08-29T23:27:16.871Z - 2019-08-29T23:42:53.172Z
-2019-08-29 19:42:59,353 - root - INFO - fileserver-008 - Export Status - SUCCEEDED
-2019-08-29 19:42:59,353 - root - INFO - fileserver-008 - SUCCEEDED - cluster:::RVM15CS005955 - poc-esx05.rangers.lab - 2019-08-29T23:27:44.498Z - 2019-08-29T23:43:01.344Z
-2019-08-29 19:43:32,826 - root - INFO - fileserver-010 - Export Status - SUCCEEDED
-2019-08-29 19:43:32,826 - root - INFO - fileserver-010 - SUCCEEDED - cluster:::RVM15CS005955 - poc-esx05.rangers.lab - 2019-08-29T23:28:08.633Z - 2019-08-29T23:43:36.782Z
-2019-08-29 19:43:39,600 - root - INFO - fileserver-009 - Export Status - SUCCEEDED
-2019-08-29 19:43:39,600 - root - INFO - fileserver-009 - SUCCEEDED - cluster:::RVM15CS006261 - poc-esx03.rangers.lab - 2019-08-29T23:28:08.238Z - 2019-08-29T23:43:41.798Z
-2019-08-29 19:43:58,232 - root - INFO - fileserver-011 - Export Status - SUCCEEDED
-2019-08-29 19:43:58,233 - root - INFO - fileserver-011 - SUCCEEDED - cluster:::RVM15CS006261 - poc-esx03.rangers.lab - 2019-08-29T23:28:34.378Z - 2019-08-29T23:44:00.804Z
-2019-08-29 19:44:02,135 - root - INFO - fileserver-012 - Export Status - SUCCEEDED
-2019-08-29 19:44:02,135 - root - INFO - fileserver-012 - SUCCEEDED - cluster:::RVM15CS006261 - poc-esx05.rangers.lab - 2019-08-29T23:28:35.097Z - 2019-08-29T23:44:05.494Z
-2019-08-29 19:44:05,170 - root - INFO - Snap Not Found : 0
-2019-08-29 19:44:05,170 - root - INFO - Vm Not Found : 0
-2019-08-29 19:44:05,170 - root - INFO - Can Be Recovered : 12
-2019-08-29 19:44:05,170 - root - INFO - Successful Recovery : 12
-2019-08-29 19:44:05,170 - root - INFO - Failed Recovery : 0
-2019-08-29 19:44:05,170 - root - INFO - Max Hosts : 2
-2019-08-29 19:44:05,171 - root - INFO - Thread Count : 6
-2019-08-29 19:44:05,171 - root - INFO - Time Elapsed : 1912.677
-2019-08-29 19:44:05,171 - root - INFO - Start Time : 2019-08-29 19:12:12.491921
-2019-08-29 19:44:05,171 - root - INFO - End Time : 2019-08-29 19:44:05.170080
-2019-08-29 19:44:05,171 - root - INFO - Recoveries Serviced cluster:::RVM15CS006261 - 5
-2019-08-29 19:44:05,171 - root - INFO - Recoveries Serviced cluster:::RVM15CS005956 - 2
-2019-08-29 19:44:05,171 - root - INFO - Recoveries Serviced cluster:::RVM15CS005955 - 4
-2019-08-29 19:44:05,171 - root - INFO - Recoveries Serviced cluster:::RVM15CS006048 - 1
-2019-08-29 19:44:05,172 - root - INFO - Recoveries Serviced poc-esx03.rangers.lab - 6
-2019-08-29 19:44:05,172 - root - INFO - Recoveries Serviced poc-esx05.rangers.lab - 6
+2019-10-06 12:23:11,594 - root - INFO - linux-minimal-0015 - RP SUCCESS - Snap 2019-10-06T07:00:06.563Z - RP 2019-10-06 12:23:10.438478+00:00)
+2019-10-06 12:23:11,731 - root - INFO - linux-minimal-0014 - RP SUCCESS - Snap 2019-10-06T07:00:04.859Z - RP 2019-10-06 12:23:10.451397+00:00)
+2019-10-06 12:23:11,803 - root - INFO - linux-minimal-0020 - RP SUCCESS - Snap 2019-10-06T08:32:48.082Z - RP 2019-10-06 12:23:10.459374+00:00)
+2019-10-06 12:23:11,814 - root - INFO - linux-minimal-0017 - RP SUCCESS - Snap 2019-10-06T09:16:09.424Z - RP 2019-10-06 12:23:10.453443+00:00)
+2019-10-06 12:23:11,820 - root - INFO - linux-minimal-0013 - RP SUCCESS - Snap 2019-10-06T07:00:06.560Z - RP 2019-10-06 12:23:10.443418+00:00)
+2019-10-06 12:23:11,836 - root - INFO - linux-minimal-0016 - RP SUCCESS - Snap 2019-10-06T07:00:08.138Z - RP 2019-10-06 12:23:10.462415+00:00)
+2019-10-06 12:23:11,891 - root - INFO - linux-minimal-0021 - RP SUCCESS - Snap 2019-10-06T08:27:10.973Z - RP 2019-10-06 12:23:10.704284+00:00)
+2019-10-06 12:23:11,906 - root - INFO - linux-minimal-0012 - RP SUCCESS - Snap 2019-10-06T07:00:04.831Z - RP 2019-10-06 12:23:10.699300+00:00)
+2019-10-06 12:23:12,032 - root - INFO - linux-minimal-0019 - RP SUCCESS - Snap 2019-10-06T08:46:29.579Z - RP 2019-10-06 12:23:10.706279+00:00)
+2019-10-06 12:23:12,052 - root - INFO - linux-minimal-0018 - RP SUCCESS - Snap 2019-10-06T07:00:04.780Z - RP 2019-10-06 12:23:10.716253+00:00)
+2019-10-06 12:23:47,584 - root - INFO - linux-minimal-0014 - LM SUCCEEDED - cluster:::RVM162S009999 - 2019-10-06T16:23:10.812Z - 2019-10-06T16:23:43.375Z 
+2019-10-06 12:23:58,138 - root - INFO - linux-minimal-0015 - LM SUCCEEDED - cluster:::RVM162S009991 - 2019-10-06T16:23:10.699Z - 2019-10-06T16:23:53.381Z 
+2019-10-06 12:23:58,140 - root - INFO - linux-minimal-0018 - LM SUCCEEDED - cluster:::RVM162S010315 - 2019-10-06T16:23:11.164Z - 2019-10-06T16:23:49.522Z 
+2019-10-06 12:23:59,492 - root - INFO - linux-minimal-0014 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:23:59,810 - root - INFO - linux-minimal-0015 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:23:59,825 - root - INFO - linux-minimal-0018 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:24:01,352 - root - INFO - linux-minimal-0020 - LM SUCCEEDED - cluster:::RVM162S009999 - 2019-10-06T16:23:10.966Z - 2019-10-06T16:23:57.736Z 
+2019-10-06 12:24:01,406 - root - INFO - linux-minimal-0022 - RP SUCCESS - Snap 2019-10-06T07:00:06.754Z - RP 2019-10-06 12:24:00.218605+00:00)
+2019-10-06 12:24:01,710 - root - INFO - linux-minimal-0019 - LM SUCCEEDED - cluster:::RVM162S009991 - 2019-10-06T16:23:11.146Z - 2019-10-06T16:23:57.278Z 
+2019-10-06 12:24:01,778 - root - INFO - linux-minimal-0024 - RP SUCCESS - Snap 2019-10-06T07:00:09.567Z - RP 2019-10-06 12:24:00.562302+00:00)
+2019-10-06 12:24:01,818 - root - INFO - linux-minimal-0023 - RP SUCCESS - Snap 2019-10-06T08:24:48.843Z - RP 2019-10-06 12:24:00.502461+00:00)
+2019-10-06 12:24:03,069 - root - INFO - linux-minimal-0020 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:24:03,875 - root - INFO - linux-minimal-0019 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:24:05,021 - root - INFO - linux-minimal-0025 - RP SUCCESS - Snap 2019-10-06T07:33:14.673Z - RP 2019-10-06 12:24:03.746458+00:00)
+2019-10-06 12:24:05,701 - root - INFO - linux-minimal-0026 - RP SUCCESS - Snap 2019-10-06T09:13:03.277Z - RP 2019-10-06 12:24:04.543080+00:00)
+2019-10-06 12:24:12,144 - root - INFO - linux-minimal-0021 - LM SUCCEEDED - cluster:::RVM162S010041 - 2019-10-06T16:23:11.000Z - 2019-10-06T16:24:10.020Z 
+2019-10-06 12:24:12,235 - root - INFO - linux-minimal-0016 - LM SUCCEEDED - cluster:::RVM162S009991 - 2019-10-06T16:23:11.000Z - 2019-10-06T16:24:10.007Z 
+2019-10-06 12:24:12,255 - root - INFO - linux-minimal-0017 - LM SUCCEEDED - cluster:::RVM162S009991 - 2019-10-06T16:23:10.923Z - 2019-10-06T16:24:07.427Z 
+2019-10-06 12:24:12,265 - root - INFO - linux-minimal-0013 - LM SUCCEEDED - cluster:::RVM162S010041 - 2019-10-06T16:23:10.897Z - 2019-10-06T16:24:09.385Z 
+2019-10-06 12:24:13,964 - root - INFO - linux-minimal-0016 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:24:14,020 - root - INFO - linux-minimal-0021 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:24:14,035 - root - INFO - linux-minimal-0013 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:24:14,045 - root - INFO - linux-minimal-0017 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:24:16,079 - root - INFO - linux-minimal-0029 - RP SUCCESS - Snap 2019-10-06T07:00:56.443Z - RP 2019-10-06 12:24:14.757103+00:00)
+2019-10-06 12:24:16,274 - root - INFO - linux-minimal-0030 - RP SUCCESS - Snap 2019-10-06T08:49:42.167Z - RP 2019-10-06 12:24:14.956524+00:00)
+2019-10-06 12:24:16,350 - root - INFO - linux-minimal-0027 - RP SUCCESS - Snap 2019-10-06T07:00:08.709Z - RP 2019-10-06 12:24:14.737111+00:00)
+2019-10-06 12:24:16,500 - root - INFO - linux-minimal-0028 - RP SUCCESS - Snap 2019-10-06T07:00:10.096Z - RP 2019-10-06 12:24:14.959512+00:00)
+2019-10-06 12:24:50,288 - root - INFO - linux-minimal-0024 - LM SUCCEEDED - cluster:::RVM162S009991 - 2019-10-06T16:24:00.847Z - 2019-10-06T16:24:42.590Z 
+2019-10-06 12:24:51,150 - root - INFO - linux-minimal-0018 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:24:52,295 - root - INFO - linux-minimal-0024 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:24:54,548 - root - INFO - linux-minimal-0031 - RP SUCCESS - Snap 2019-10-06T07:32:22.014Z - RP 2019-10-06 12:24:53.060913+00:00)
+2019-10-06 12:24:54,888 - root - INFO - linux-minimal-0014 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:24:58,747 - root - INFO - linux-minimal-0020 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:25:03,126 - root - INFO - linux-minimal-0028 - LM SUCCEEDED - cluster:::RVM162S009991 - 2019-10-06T16:24:15.608Z - 2019-10-06T16:25:00.566Z 
+2019-10-06 12:25:08,032 - root - INFO - linux-minimal-0022 - LM SUCCEEDED - cluster:::RVM162S009999 - 2019-10-06T16:24:00.438Z - 2019-10-06T16:24:58.879Z 
+2019-10-06 12:25:08,473 - root - INFO - linux-minimal-0013 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:25:08,532 - root - INFO - linux-minimal-0015 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:25:10,004 - root - INFO - linux-minimal-0022 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:25:10,237 - root - INFO - linux-minimal-0028 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:25:11,679 - root - INFO - linux-minimal-0027 - LM SUCCEEDED - cluster:::RVM162S009999 - 2019-10-06T16:24:15.510Z - 2019-10-06T16:25:07.989Z 
+2019-10-06 12:25:12,296 - root - INFO - linux-minimal-0021 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:25:12,316 - root - INFO - linux-minimal-0019 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:25:13,557 - root - INFO - linux-minimal-0027 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:25:15,805 - root - INFO - linux-minimal-0030 - LM SUCCEEDED - cluster:::RVM162S009991 - 2019-10-06T16:24:15.402Z - 2019-10-06T16:25:11.263Z 
+2019-10-06 12:25:16,214 - root - INFO - linux-minimal-0016 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:25:18,666 - root - INFO - linux-minimal-0030 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:25:20,299 - root - ERROR - linux-minimal-0012 - LM WAIT (cluster:::RVM162S009999) - Start (2019-10-06T16:23:11.032Z) - End (2019-10-06T16:24:36.424Z)
+2019-10-06 12:25:29,097 - root - INFO - linux-minimal-0031 - LM SUCCEEDED - cluster:::RVM162S010315 - 2019-10-06T16:24:53.626Z - 2019-10-06T16:25:26.873Z 
+2019-10-06 12:25:36,197 - root - INFO - linux-minimal-0031 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:25:52,485 - root - INFO - linux-minimal-0026 - LM SUCCEEDED - cluster:::RVM162S010315 - 2019-10-06T16:24:04.728Z - 2019-10-06T16:25:48.963Z 
+2019-10-06 12:25:54,394 - root - INFO - linux-minimal-0017 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:25:54,950 - root - INFO - linux-minimal-0026 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:25:57,811 - root - INFO - linux-minimal-0022 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:26:00,448 - root - INFO - linux-minimal-0027 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:26:04,225 - root - INFO - linux-minimal-0024 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:26:04,681 - root - INFO - linux-minimal-0028 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:26:06,489 - root - INFO - linux-minimal-0030 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:26:17,408 - root - INFO - linux-minimal-0029 - LM SUCCEEDED - cluster:::RVM162S010315 - 2019-10-06T16:24:15.188Z - 2019-10-06T16:26:13.627Z 
+2019-10-06 12:26:18,793 - root - ERROR - linux-minimal-0025 - LM WAIT (cluster:::RVM162S009999) - Start (2019-10-06T16:24:04.100Z) - End (2019-10-06T16:25:43.786Z)
+2019-10-06 12:26:18,801 - root - ERROR - linux-minimal-0023 - LM WAIT (cluster:::RVM162S010041) - Start (2019-10-06T16:24:00.922Z) - End (2019-10-06T16:25:44.525Z)
+2019-10-06 12:26:19,258 - root - INFO - linux-minimal-0029 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:26:27,441 - root - INFO - linux-minimal-0012 - LM SUCCEEDED - cluster:::RVM162S009991 - 2019-10-06T16:25:22.369Z - 2019-10-06T16:26:22.536Z 
+2019-10-06 12:26:29,291 - root - INFO - linux-minimal-0012 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:26:45,948 - root - INFO - linux-minimal-0031 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:26:46,310 - root - INFO - linux-minimal-0026 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:27:03,885 - root - INFO - linux-minimal-0023 - LM SUCCEEDED - cluster:::RVM162S009991 - 2019-10-06T16:26:20.887Z - 2019-10-06T16:26:58.758Z 
+2019-10-06 12:27:05,693 - root - INFO - linux-minimal-0023 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:27:20,376 - root - INFO - linux-minimal-0025 - LM SUCCEEDED - cluster:::RVM162S009991 - 2019-10-06T16:26:20.861Z - 2019-10-06T16:27:15.707Z 
+2019-10-06 12:27:23,597 - root - INFO - linux-minimal-0029 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:27:25,519 - root - INFO - linux-minimal-0025 - SVM QUEUED to DataStore:::43f24198-ace2-47b4-a441-e998812e0673-datastore-37
+2019-10-06 12:27:28,294 - root - INFO - linux-minimal-0012 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:28:04,893 - root - INFO - linux-minimal-0023 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:28:09,407 - root - INFO - linux-minimal-0025 - SVM SUCCESS - to PURE-DS8-10TB
+2019-10-06 12:28:12,410 - root - INFO - Can Be Recovered : 20
+2019-10-06 12:28:12,411 - root - INFO - Successful Livemount : 20
+2019-10-06 12:28:12,412 - root - INFO - Successful Relocate : 20
+2019-10-06 12:28:12,414 - root - INFO - Nfs Limit Wait : 3
+2019-10-06 12:28:12,415 - root - INFO - Max Hosts : 5
+2019-10-06 12:28:12,416 - root - INFO - Function Threads : 10
+2019-10-06 12:28:12,417 - root - INFO - Thread Count : 10
+2019-10-06 12:28:12,418 - root - INFO - Time Elapsed : 257.007
+2019-10-06 12:28:12,420 - root - INFO - Start Time : 2019-10-06 12:23:08.528495
+2019-10-06 12:28:12,421 - root - INFO - End Time : 2019-10-06 12:27:25.535125
+2019-10-06 12:28:12,425 - root - INFO - MttR - Median : 64.924
+2019-10-06 12:28:12,426 - root - INFO - MttR - Mean : 84.644
+2019-10-06 12:28:12,427 - root - INFO - MttR - Min : 43.894
+2019-10-06 12:28:12,435 - root - INFO - MttR - Max : 202.441
 ```
 </p>
 </details>
