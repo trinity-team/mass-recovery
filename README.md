@@ -10,7 +10,6 @@ Allows a user to mass-recover from Rubrik and caters to various recovery types.
 ## Requires
 - python3
 - requests
-- pyvmomi (optional)
 
 ## Usage
 ## Running the script
