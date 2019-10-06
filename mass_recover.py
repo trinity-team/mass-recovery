@@ -5,7 +5,6 @@ import random
 import csv
 import urllib.parse
 import logging
-import pprint
 import json
 import os
 import statistics
@@ -19,7 +18,6 @@ from dateutil.parser import parse
 from datetime import datetime
 from gc import collect as gc
 import urllib3
-pp = pprint.PrettyPrinter(indent=4)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 try:
@@ -37,6 +35,11 @@ if 'max_hosts' not in config:
 
 if 'limit' not in config:
     config['limit'] = 0
+
+if 'power_on' not in config:
+    config['power_on'] = False
+else:
+    config['power_on'] = True
 
 sla = "Bronze"
 rn = {}
@@ -66,6 +69,8 @@ m = {
     "successful_recovery": 0,
     "successful_livemount": 0,
     "successful_relocate": 0,
+    "nfs_limit_wait": 0,
+    "nfs_limit_fail": 0,
     "successful_unmount": 0,
     "failed_operations": 0,
     "max_hosts": config['max_hosts'],
@@ -113,7 +118,7 @@ def run_threads(v, t, f):
 
 
 # Main Worker Process
-def run_assessment_process(vm):
+def run_function(vm):
     b = timer()
     vid = get_vm_id(vm['Object Name'])
     if vid is None:
@@ -369,7 +374,7 @@ def livemount_vm(v, si):
         lo = {
             "disableNetwork": True,
             "removeNetworkDevices": False,
-            "powerOn": True,
+            "powerOn": config['power_on'],
         }
         u = ("{}{}/{}/mount".format(random.choice(node_ips), c, si))
         r = requests.post(u, json=lo, headers=header, verify=False,
@@ -394,10 +399,14 @@ def livemount_vm(v, si):
                 return 1
             if "FAIL" in ls:
                 if 'Failed to create NAS datastore' in json.dumps(r['error']):
-                    time.sleep(20)
                     if config['nfs_wait']:
                         complete = False
                         r['status'] = "WAIT"
+                        m['nfs_limit_wait'] += 1
+                        time.sleep(30)
+                    else:
+                        complete = True
+                        m['nfs_limit_fail'] += 1
                 else:
                     m['failed_operations'] += 1
                     logging.error(r['error'])
@@ -417,7 +426,7 @@ def export_vm(v, si, hi, di, h):
     lo = {
         "disableNetwork": False,
         "removeNetworkDevices": False,
-        "powerOn": False,
+        "powerOn": config['power_on'],
         "keepMacAddresses": True,
         "hostId": "{}".format(hi),
         "datastoreId": "{}".format(di),
@@ -546,7 +555,7 @@ if __name__ == '__main__':
 
     # Run the recoveries
     print("Running Recovery")
-    run_threads(data, config['function_threads'], run_assessment_process)
+    run_threads(data, config['function_threads'], run_function)
     end = timer()
     progress(len(data), len(data), "Completed in {} seconds                                              ".format(end - start))
     m['time_elapsed'] = round(end - start, 3)
@@ -562,7 +571,6 @@ if __name__ == '__main__':
             sys.stdout.write(s + "\r")
             sys.stdout.flush()
             time.sleep(1)
-        #svm_vm.task_done()
 
         for s in svm_threads:
             s.join()

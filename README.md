@@ -42,7 +42,8 @@ Running Recovery
   "show_progress": true,
   "svm": true,
   "svm_threads": 8,
-  "nfs_wait": 3,
+  "nfs_wait": true,
+  "power_on": true,
   "prefix": "pm-test_",
   "max_hosts": 3,
 }
@@ -65,6 +66,7 @@ Running Recovery
 - nfs_wait (bool) - wait for NFS datastore availablity (play nice with vmware)
 - svm (bool) - set with livemount so that we sVM machines upon mount to original datastore
 - svm_threads (int) - set with livemount to put a concurrency on running sVM 
+- power_on (bool) - set to power machines on upon exposure to vSphere
 - recovery_point - set to date in order to recover latest RP up to that point in time
 
 ## Input File
