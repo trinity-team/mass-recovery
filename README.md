@@ -47,6 +47,7 @@
 - omit_hosts (arr/str) - esx hosts that we don't want to export to
 - show_progress (bool) - set to true to have an idea of progress
 - svm (bool) - set with livemount so that we sVM machines upon mount to original datastore
+- svm_threads (int) - set with livemount to put a concurrency on running sVM 
 - recovery_point - set to date in order to recover latest RP up to that point in time
 
 ### Super Experimental Configuration (Requires pyvmomi)

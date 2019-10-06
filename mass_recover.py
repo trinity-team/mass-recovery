@@ -12,6 +12,10 @@ import statistics
 import pytz
 from timeit import default_timer as timer
 from multiprocessing.pool import ThreadPool
+from multiprocessing import Process
+from threading import Thread
+import threading
+from queue import Queue
 from dateutil.parser import parse
 from datetime import datetime
 from gc import collect as gc
@@ -39,7 +43,7 @@ sla = "Bronze"
 rn = {}
 svm_vm = {}
 timestr = time.strftime("%Y%m%d-%H%M%S")
-d = "{}_{}_{}".format(config['threads'], config['max_hosts'], config['limit'])
+d = "{}_{}_{}".format(config['function_threads'], config['max_hosts'], config['limit'])
 
 kpi = []
 
@@ -58,13 +62,15 @@ track = {}
 m = {
     "snap_not_found": 0,
     "vm_not_found": 0,
+    "active_svm": 0,
     "can_be_recovered": 0,
     "successful_recovery": 0,
     "successful_livemount": 0,
+    "successful_relocate": 0,
     "successful_unmount": 0,
     "failed_operations": 0,
     "max_hosts": config['max_hosts'],
-    "thread_count": config['threads']
+    "thread_count": config['function_threads']
 }
 
 recoveries = {}
@@ -78,13 +84,16 @@ header = {'Accept': 'application/json', 'Authorization': auth_header}
 
 
 # Progress Bar
-def progress(c, t, s=''):
+def progress(c, t, s='', sl=''):
     bl = 60
     fl = int(round(bl * c / float(t)))
     p = round(100.0 * c / float(t), 1)
     b = '=' * fl + '-' * (bl - fl)
     if 'show_progress' in config and config['show_progress']:
-        sys.stdout.write('[%s] %s%s (%s)\r' % (b, p, '%', s))
+        if sl:
+            sys.stdout.write('[%s] %s%s %s %s\r' % (b, p, '%', s, sl))
+        else:
+            sys.stdout.write('[%s] %s%s %s\r' % (b, p, '%', s))
         sys.stdout.flush()
         if c == t:
             sys.stdout.flush()
@@ -97,13 +106,14 @@ def run_threads(v, t, f):
     t = len(v)
     r = p.map_async(f, v, chunksize=1)
     while not r.ready():
-        progress((t - r._number_left), t,
-                 "{} of {}".format(t - r._number_left, t))
+        if config['svm']:
+            s = "Storage vMotion ({} Complete,  {} Running,  {} Queued)".format(m['successful_relocate'], m['active_svm'], svm_vm.qsize())
+        progress((t - r._number_left), t, "({} of {})".format(t - r._number_left, t ), s)
     p.close()
     p.join()
 
 
-# Worker Process
+# Main Worker Process
 def run_assessment_process(vm):
     b = timer()
     vid = get_vm_id(vm['Object Name'])
@@ -123,13 +133,17 @@ def run_assessment_process(vm):
         return
     m['can_be_recovered'] += 1
     if config['function'] == 'livemount':
+        mount_id, mounted_vm_id = livemount_vm(vm['Object Name'], si)
+        svm_obj = {mount_id: {}}
         if config['svm']:
-            disk_id = get_vdisk_id(vi)
-            di = datastore_map[disk_id]
-        mvmid = livemount_vm(vm['Object Name'], si)
-        logging.info("{} - Queue sVM {} to {} (disk {})".format(
-            vm['Object Name'], mvmid, di[0], di[1]))
-        svm_vm[mvmid] = di
+            ds = get_vdisk_id(vi)
+            di = datastore_map[ds]
+            logging.info("{} - Queue sVM {} to {} (disk {})".format(vm['Object Name'], mount_id, di[0], di[1]))
+            svm_obj['datastoreName'] = di[0]
+            svm_obj['datastoreId'] = di[1]
+            svm_obj['vmId'] = mounted_vm_id
+            svm_obj['mountId'] = mount_id
+            svm_vm.put(svm_obj)
     elif config['function'] == 'unmount':
         unmount_vm(vm['Object Name'], vi)
     elif config['function'] == 'export':
@@ -173,7 +187,6 @@ def get_ips(i):
         if n['status'] == "OK":
             o.append("https://{}".format(n['ipAddress']))
     return o
-
 
 
 # zips csv file into a keyed dictionary
@@ -235,24 +248,6 @@ def get_vm_structure():
     return h
 
 
-# Set SLA
-def set_vm_sla(v):
-    c = "/api/v1/vmware/vm"
-    lo = {"configuredSlaDomainId": "{}".format(get_sla_id(sla))}
-    u = ("{}{}/{}".format(random.choice(node_ips), c, v))
-    requests.patch(u, json=lo, headers=header, verify=False, timeout=15).json()
-
-
-def get_sla_id(s):
-    c = "/api/v2/sla_domain"
-    u = ("{}{}?name={}&primary_cluster_id=local".format(
-        random.choice(node_ips), c, urllib.parse.quote(s)))
-    r = requests.get(u, headers=header, verify=False, timeout=15).json()
-    for o in r['data']:
-        if o['name'] == sla:
-            return o['id']
-
-
 # Grab the Datastore name from the VM Record
 def get_vdisk_id(v):
     c = "/api/v1/vmware/vm/"
@@ -305,15 +300,15 @@ def get_vm_id(v):
 
 
 def livemount_table():
-    lma = {}
+    o = {}
     c = "/api/v1/vmware/vm/snapshot/mount"
     u = ("{}{}?limit=9999".format(random.choice(node_ips), c))
     r = requests.get(u, headers=header, verify=False, timeout=15).json()
     for response in r['data']:
-        if response['vmId'] not in lma:
-            lma[response['vmId']] = []
-        lma[response['vmId']].append(response['id'])
-    return lma
+        if response['vmId'] not in o:
+            o[response['vmId']] = []
+        o[response['vmId']].append(response['id'])
+    return o
 
 
 def unmount_vm(v, vi):
@@ -328,40 +323,44 @@ def unmount_vm(v, vi):
 
 
 def relocate_vm(vm):
-    try:
-        c = "/api/v1/vmware/vm/snapshot/mount"
-        lo = {
-            "datastoreId": svm_vm[vm][1]
-        }
-        u = ("{}{}/{}/relocate".format(random.choice(node_ips), c, vm))
-        r = requests.post(u, json=lo, headers=header, verify=False, timeout=15).json()
-        pp.pprint(r)
-        t = r['id']
-        s = False
-        while not s:
-            c = "/api/v1/vmware/vm/request"
-            u = ("{}{}/{}".format(random.choice(node_ips), c, t))
-            print("Checking {} ".format(u))
-            r = requests.get(u, headers=header, verify=False, timeout=15).json()
-            pp.pprint(r)
-            ls = r['status']
-            if ls == "SUCCEEDED":
-                logging.info("{} - Relocate Status - {} - {} - {} - {} ".format(
-                    v, r['status'], r['nodeId'], r['startTime'], r['endTime']))
-                m['successful_relocate'] += 1
-                s = True
-            if "FAIL" in ls:
-                logging.error(
-                    "{} - Relocate Status - {} ({}) - Start ({}) - End ({})".
-                        format(v, r['status'], r['nodeId'], r['startTime'],
-                               r['endTime']))
-                m['failed_operations'] += 1
-                s = True
-                time.sleep(3)
-    except Exception as e:
-        print(e.message)
-    return
-
+    run = True
+    while run:
+        svm_object = dict(vm.get(block=True))
+        try:
+            c = "/api/v1/vmware/vm/snapshot/mount"
+            lo = {
+                "datastoreId": svm_object['datastoreId']
+            }
+            u = ("{}{}/{}/relocate".format(random.choice(node_ips), c, svm_object['mountId']))
+            r = requests.post(u, json=lo, headers=header, verify=False, timeout=15).json()
+            t = r['id']
+            s = False
+            m['active_svm'] += 1
+            while not s:
+                try:
+                    c = "/api/internal/event"
+                    u = ("{}{}?object_ids={}".format(random.choice(node_ips), c, svm_object['vmId']))
+                    r = requests.get(u, headers=header, verify=False, timeout=15).json()
+                    for result in r['data']:
+                        if t == result['jobInstanceId']:
+                            if result['eventStatus'] == "Success":
+                                logging.info(
+                                    "{} - Successful sVM {} to {}".format(svm_object['vmId'], svm_object, svm_object['datastoreName']))
+                                m['successful_relocate'] += 1
+                                s = True
+                            elif "Fail" in result['eventStatus']:
+                                logging.error(
+                                    "{} - Failed sVM {} to {}".format(svm_object['vmId'], svm_object['mountId'], svm_object['datastoreName']))
+                                m['failed_relocate'] += 1
+                                s = True
+                    time.sleep(3)
+                except Exception as e:
+                    print(e)
+            if svm_vm.empty():
+                run = False
+        except Exception as e:
+            print(e)
+        m['active_svm'] -= 1
 
 def livemount_vm(v, si):
     c = "/api/v1/vmware/vm/snapshot"
@@ -388,17 +387,19 @@ def livemount_vm(v, si):
                 for i in r['links']:
                     if i['rel'] == 'result':
                         o = requests.get(i['href'], headers=header, verify=False, timeout=15).json()
-                        return o['id']
+                        return o['id'], o['mountedVmId']
             s = True
+            return 1
         if "FAIL" in ls:
             logging.error(
                 "{} - Livemount Status - {} ({}) - Start ({}) - End ({})".
                     format(v, r['status'], r['nodeId'], r['startTime'],
                            r['endTime']))
+            logging.error(r['error'])
             m['failed_operations'] += 1
             s = True
         time.sleep(3)
-    return
+    return 0
 
 
 def export_vm(v, si, hi, di, h):
@@ -476,6 +477,7 @@ def get_snapshot_id(vin):
 
 
 def print_m(m):
+    print("\n Job Statistics:")
     for i in m:
         if m[i] != 0:
             print("\t {} : {}".format(i.replace('_', ' ').title(), m[i]))
@@ -506,118 +508,79 @@ def get_objs(c, t, f=None, r=True):
     return obj
 
 
-def find_host(c, n):
-    hs = get_objs(c, [vim.HostSystem])
-    for o in hs:
-        if o.name == n:
-            return o
-    return None
-
-
-# Get Rubrik Nodes so we can thread against them
-print("Getting Rubrik Node Information", end='')
-node_ips = get_ips(config['rubrik_host'])
-print(" - Done")
-
-# Get VMware structure so that we can round robin
-if config['function'] == 'export' or config['svm']:
-    print("Getting VMware Structures", end='')
-    vm_struc = get_vm_structure()
+if __name__ == '__main__':
+    # Get Rubrik Nodes so we can thread against them
+    print("Getting Rubrik Node Information", end='')
+    node_ips = get_ips(config['rubrik_host'])
     print(" - Done")
 
-    # Get datastore map
-    print("Getting Datastore Map", end='')
-    datastore_map = get_datastore_map()
+    # Get VMware structure so that we can round robin
+    if config['function'] == 'export' or config['svm']:
+        print("Getting VMware Structures", end='')
+        vm_struc = get_vm_structure()
+        print(" - Done")
+
+        # Get datastore map
+        print("Getting Datastore Map", end='')
+        datastore_map = get_datastore_map()
+        print(" - Done")
+
+    if config['function'] == 'unmount':
+        lmt = livemount_table()
+
+    # Grab recovery info from csv
+    print("Getting Recovery Data", end='')
+    data = get_csv_data(config['in_file'])
+    if config['limit'] > 0:
+        data = data[0:config['limit']]
     print(" - Done")
 
-if config['function'] == 'unmount':
-    lmt = livemount_table()
+    # start the svm processor
+    if config['svm']:
+        svm_vm = Queue()
+        svm_threads = []
+        for i in range(config['svm_threads']):
+            svm_process = Thread(target=relocate_vm, args=(svm_vm,))
+            svm_threads.append(svm_process)
+        #    svm_process.setDaemon(True)
+            svm_process.start()
 
+    # Run the recoveries
+    print("Running Recovery")
+    run_threads(data, config['function_threads'], run_assessment_process)
+    end = timer()
+    progress(len(data), len(data), "Completed in {} seconds                                              ".format(end - start))
+    m['time_elapsed'] = round(end - start, 3)
+    m['start_time'] = startTime
+    endTime = datetime.now()
+    m['end_time'] = endTime
+    print('')
 
-# Grab recovery info from csv
-print("Getting Recovery Data", end='')
-data = get_csv_data(config['in_file'])
-if config['limit'] > 0:
-    data = data[0:config['limit']]
-print(" - Done")
+    if config['svm']:
+        while not svm_vm.empty():
+            main_thread = threading.current_thread()
+            s = "Storage vMotion: ({} Complete,  {} Running,  {} Queued)".format(m['successful_relocate'], m['active_svm'], svm_vm.qsize())
+            sys.stdout.write(s + "\r")
+            sys.stdout.flush()
+            time.sleep(5)
+        if svm_vm.empty():
+            s = "Storage vMotion: ({} Complete,  {} Running,  {} Queued)".format(m['successful_relocate'], m['active_svm'], svm_vm.qsize())
+            sys.stdout.write(s)
+            sys.stdout.flush()
+        svm_vm.task_done()
 
-# Run the recoveries
-print("Running Recovery")
-run_threads(data, config['threads'], run_assessment_process)
-print("Recovery Complete")
-end = timer()
-progress(len(data), len(data), "Completed in {} seconds".format(end - start))
-m['time_elapsed'] = round(end - start, 3)
-m['start_time'] = startTime
-endTime = datetime.now()
-m['end_time'] = endTime
+        print('')
+        for s in svm_threads:
+            s.join()
 
-if config['function'] == 'livemount' and config['svm']:
-    time.sleep(10)
-    print("Running relocation")
-    run_threads(svm_vm, config['threads'], relocate_vm)
+#        run_threads(svm_vm, config['threads'], relocate_vm)
 
-print_m(m)
-for i in rn:
-    logging.info("Recoveries Serviced {} - {}".format(i, rn[i]))
+    print_m(m)
 
-for h in recoveries:
-    logging.info("Recoveries Serviced {} - {}".format(h, recoveries[h]))
+    for i in rn:
+        logging.info("Recoveries Serviced {} - {}".format(i, rn[i]))
 
-if config['debug']:
-    from pyVmomi import vim
-    from pyVim import connect
+    for h in recoveries:
+        logging.info("Recoveries Serviced {} - {}".format(h, recoveries[h]))
 
-    for host_name in recoveries:
-        # Log into the ESX Host
-        service_instance = connect.SmartConnect(host=host_name,
-                                                user=config['esx_user'],
-                                                pwd=config['esx_pass'])
-        content = service_instance.RetrieveContent()
-        perfManager = content.perfManager
-        host_mos = find_host(content, host_name)
-        counters = {}
-        # Assemble a hash of details for the counters
-        for ct in perfManager.perfCounter:
-            cfn = ct.groupInfo.key + "." + ct.nameInfo.key + \
-                "." + ct.rollupType
-            counters[ct.key] = {}
-            counters[ct.key]['name'] = cfn
-            counters[ct.key]['unit'] = ct.unitInfo.label
-        # Query for the counters
-        counterIDs = [
-            m.counterId
-            for m in perfManager.QueryAvailablePerfMetric(entity=host_mos)
-        ]
-        metricIDs = [
-            vim.PerformanceManager.MetricId(counterId=c, instance="*")
-            for c in counterIDs
-        ]
-        spec = vim.PerformanceManager.QuerySpec(entity=host_mos,
-                                                metricId=metricIDs,
-                                                startTime=startTime)
-        q = perfManager.QueryStats(querySpec=[spec])
-        # Figure out what to log
-        for val in q[0].value:
-            if "net.bytes" in counters[
-                val.id.counterId]['name'] or "net.usage" in counters[
-                val.id.counterId]['name']:
-                calc = 0
-                samp = 0
-                metric_max = 0
-                if val.id.instance == '':
-                    for v in val.value:
-                        if v != -1:
-                            calc += v
-                            if v > metric_max:
-                                metric_max = v
-                            samp += 1
-                    calc = round(calc / samp)
-                    logging.info(
-                        "{} - {} - avg:{}{} max:{}{} samples:{} - experimental"
-                            .format(host_mos.name,
-                                    counters[val.id.counterId]['name'], calc,
-                                    counters[val.id.counterId]['unit'], metric_max,
-                                    counters[val.id.counterId]['unit'], samp))
-        connect.Disconnect(service_instance)
 exit()
