@@ -113,7 +113,7 @@ def run_threads(v, t, f):
     t = len(v)
     r = p.map_async(f, v, chunksize=1)
     while not r.ready():
-        if 'svm' in config:
+        if 'svm' in config and config['svm']:
             s = "Storage vMotion ({} Complete,  {} Running,  {} Queued)".format(m['successful_relocate'], m['active_svm'], svm_vm.qsize())
         else:
             s = ''
@@ -144,7 +144,7 @@ def run_function(vm):
     if config['function'] == 'livemount':
         mount_id, mounted_vm_id = livemount_vm(vm['Object Name'], si)
         svm_obj = {mount_id: {}}
-        if 'svm' in config:
+        if 'svm' in config and config['svm']:
             ds = get_vdisk_id(vi)
             di = datastore_map[ds]
             logging.info("{} - SVM QUEUED - {} ({})".format(vm['Object Name'], di[1], di[0]))
@@ -545,7 +545,7 @@ if __name__ == '__main__':
     print(" - Done")
 
     # Get VMware structure so that we can round robin
-    if config['function'] == 'export' or 'svm' in config:
+    if config['function'] == 'export' or ('svm' in config and config['svm']):
         print("Getting VMware Structures", end='')
         vm_struc = get_vm_structure()
         print(" - Done")
@@ -570,7 +570,7 @@ if __name__ == '__main__':
 
     # start the svm processor
     svm_threads = []
-    if 'svm' in config:
+    if 'svm' in config and config['svm']:
         svm_vm = Queue()
         if len(data) < config['svm_threads']:
             config['svm_threads'] = len(data)
@@ -592,7 +592,7 @@ if __name__ == '__main__':
     print('')
 
     # Put some output for the remaining SVM
-    if 'svm' in config:
+    if 'svm' in config and config['svm']:
         while True:
             s = "Storage vMotion: ({} Complete,  {} Running,  {} Queued) Livemounts Active: {}".format(m['successful_relocate'], m['active_svm'], svm_vm.qsize(), m['active_livemounts'])
             sys.stdout.write(s + "\r")
