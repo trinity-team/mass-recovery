@@ -5,7 +5,8 @@ Allows a user to mass-recover from Rubrik and caters to various recovery types.
 - Livemount
 - Unmount
 - Livemount with SVM (Independent queues, fails on VMware NFS limit)
-- Livemount with SVM (Queued if VMware NFS limit is hit)
+- Livemount with SVM (Queued if VMware NFS limit is hit (brute))
+- Livemount with SVM (Configured limit of Livemount concurrency)
   
 ## Requires
 - python3
@@ -39,6 +40,7 @@ Running Recovery
   "rubrik_key": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI5ZDFkYjQ2Yi1iYmEzLTRkMGItYjc5ZC01OGZiYWE4ZTgzOWIiLCJpc3MiOiJlNjY3ZWY4Yi01Y2E2LTQ1OTYtYjBhMi1jMjZjNzVhMGMzMjYiLCJqdGkiOiIxNTgyNzdlZS00M2M0LTRlODYtYjU4NC0xMzA0ZmY3OTI1ZmIifQ.9pAudx3eXYAoe9l2Y_9Qy64FldED9EeGHErE4823EAM",
   "recovery_point": "2019-09-10 21:45:47",
   "show_progress": true,
+  "max_livemounts": 2,
   "svm": true,
   "svm_threads": 8,
   "nfs_wait": true,
@@ -63,7 +65,8 @@ Running Recovery
 - omit_hosts (arr/str) - esx hosts that we don't want to export to
 - show_progress (bool) - set to true to have an idea of progress
 - nfs_wait (bool) - wait for NFS datastore availablity (play nice with vmware)
-    Note: This will show a failure in vCenter with a subsequent success.
+    Note: This will show a failure in vCenter with a subsequent success
+- max_livemounts (int) - set an explicit number of concurrent NFS mounts, another way to play nice with VMware
 - svm (bool) - set with livemount so that we sVM machines upon mount to original datastore
 - svm_threads (int) - set with livemount to put a concurrency on running sVM 
 - power_on (bool) - set to power machines on upon exposure to vSphere

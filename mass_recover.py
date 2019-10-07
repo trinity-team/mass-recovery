@@ -60,17 +60,19 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-#track = {}
-
 m = {
     "snap_not_found": 0,
     "vm_not_found": 0,
     "active_svm": 0,
+    "active_livemounts": 0,
+    "kill_threads": 0,
+    "pending_livemounts": 0,
     "can_be_recovered": 0,
     "successful_recovery": 0,
     "successful_livemount": 0,
     "successful_relocate": 0,
     "nfs_limit_wait": 0,
+    "livemount_limit_wait": 0,
     "nfs_limit_fail": 0,
     "successful_unmount": 0,
     "failed_operations": 0,
@@ -113,6 +115,8 @@ def run_threads(v, t, f):
     while not r.ready():
         if config['svm']:
             s = "Storage vMotion ({} Complete,  {} Running,  {} Queued)".format(m['successful_relocate'], m['active_svm'], svm_vm.qsize())
+        else:
+            s = ''
         progress((t - r._number_left), t, "({} of {})".format(t - r._number_left, t ), s)
     p.close()
     p.join()
@@ -143,7 +147,7 @@ def run_function(vm):
         if config['svm']:
             ds = get_vdisk_id(vi)
             di = datastore_map[ds]
-            logging.info("{} - SVM QUEUED to {}".format(vm['Object Name'], di[1]))
+            logging.info("{} - SVM QUEUED - {} ({})".format(vm['Object Name'], di[1], di[0]))
             svm_obj['datastoreName'] = di[0]
             svm_obj['datastoreId'] = di[1]
             svm_obj['vmId'] = mounted_vm_id
@@ -329,11 +333,14 @@ def unmount_vm(v, vi):
 
 
 def relocate_vm(vm):
-    run = True
-    while run:
-        svm_object = dict(vm.get(block=True))
+    svm_started = False
+    while True:
+        if svm_started and not vm.qsize() and not m['active_livemounts'] and not m['pending_livemounts']:
+            sys.exit()
+        svm_object = dict(vm.get())
         svm_start = timer()
         try:
+            svm_started = True
             c = "/api/v1/vmware/vm/snapshot/mount"
             lo = {
                 "datastoreId": svm_object['datastoreId']
@@ -341,9 +348,11 @@ def relocate_vm(vm):
             u = ("{}{}/{}/relocate".format(random.choice(node_ips), c, svm_object['mountId']))
             r = requests.post(u, json=lo, headers=header, verify=False, timeout=15).json()
             t = r['id']
-            s = False
+            this_svm_complete = False
             m['active_svm'] += 1
-            while not s:
+            logging.info(
+                "{} - SVM RUNNING - {} ({})".format(svm_object['vmName'], svm_object['datastoreName'], svm_object['datastoreId']))
+            while not this_svm_complete:
                 try:
                     c = "/api/internal/event"
                     u = ("{}{}?object_ids={}".format(random.choice(node_ips), c, svm_object['vmId']))
@@ -352,19 +361,18 @@ def relocate_vm(vm):
                         if t == result['jobInstanceId']:
                             if result['eventStatus'] == "Success":
                                 logging.info(
-                                    "{} - SVM SUCCEED - to {}".format(svm_object['vmName'], svm_object['datastoreName']))
+                                    "{} - SVM SUCCEED - {} ({})".format(svm_object['vmName'], svm_object['datastoreName'], svm_object['datastoreId']))
                                 m['successful_relocate'] += 1
-                                s = True
+                                m['active_livemounts'] -= 1
+                                this_svm_complete = True
                             elif "Fail" in result['eventStatus']:
                                 logging.error(
-                                    "{} - SVM FAIL {} to {}".format(svm_object['vmName'], svm_object['datastoreName']))
+                                    "{} - SVM FAIL - {} ({})".format(svm_object['vmName'], svm_object['datastoreName'], svm_object['datastoreId']))
                                 m['failed_relocate'] += 1
-                                s = True
+                                this_svm_complete = True
                     time.sleep(3)
                 except Exception as e:
                     print(e)
-            if svm_vm.empty():
-                run = False
         except Exception as e:
             print(e)
         svm_end = timer()
@@ -373,60 +381,69 @@ def relocate_vm(vm):
 
 
 def livemount_vm(v, si):
-    complete = False
-    while not complete:
-        c = "/api/v1/vmware/vm/snapshot"
-        lo = {
-            "disableNetwork": True,
-            "removeNetworkDevices": False,
-            "powerOn": config['power_on'],
-        }
-        u = ("{}{}/{}/mount".format(random.choice(node_ips), c, si))
-        r = requests.post(u, json=lo, headers=header, verify=False,
-                          timeout=15).json()
-        t = r['id']
-        s = False
-        while not s:
-            c = "/api/v1/vmware/vm/request"
-            u = ("{}{}/{}".format(random.choice(node_ips), c, t))
-            r = requests.get(u, headers=header, verify=False, timeout=15).json()
-            ls = r['status']
-            if ls == "SUCCEEDED":
-                logging.info("{} - LM {} - {} - {} - {} ".format(
-                    v, r['status'], r['nodeId'], r['startTime'], r['endTime']))
-                m['successful_livemount'] += 1
-                if config['svm']:
-                    for i in r['links']:
-                        if i['rel'] == 'result':
-                            o = requests.get(i['href'], headers=header, verify=False, timeout=15).json()
-                            return o['id'], o['mountedVmId']
-                s = True
-                return 1
-            if "FAIL" in ls:
-                if 'Failed to create NAS datastore' in json.dumps(r['error']):
-                    if config['nfs_wait']:
-                        complete = False
-                        r['status'] = "WAIT"
-                        m['nfs_limit_wait'] += 1
-                        time.sleep(30)
-                    else:
-                        complete = True
-                        m['nfs_limit_fail'] += 1
-                else:
-                    m['failed_operations'] += 1
-                    logging.error(r['error'])
-                    complete = True
-                logging.error(
-                    "{} - LM {} ({}) - Start ({}) - End ({})".
-                        format(v, r['status'], r['nodeId'], r['startTime'],
-                               r['endTime']))
-                s = True
+    lm_active = False
+    lm_queued = False
+    while not lm_active:
+        if m['active_livemounts'] >= config['max_livemounts'] and not lm_queued:
+            lm_queued = True
+            m['livemount_limit_wait'] += 1
+            m['pending_livemounts'] += 1
             time.sleep(3)
+        elif m['active_livemounts'] < config['max_livemounts']:
+            m['active_livemounts'] += 1
+            c = "/api/v1/vmware/vm/snapshot"
+            lo = {
+                "disableNetwork": True,
+                "removeNetworkDevices": False,
+                "powerOn": config['power_on'],
+            }
+            if 'prefix' in config:
+                lo['vmName'] = "{}{}".format(config['prefix'], v)
+            u = ("{}{}/{}/mount".format(random.choice(node_ips), c, si))
+            r = requests.post(u, json=lo, headers=header, verify=False,
+                              timeout=15).json()
+            t = r['id']
+            lm_complete = False
+            while not lm_complete:
+                c = "/api/v1/vmware/vm/request"
+                u = ("{}{}/{}".format(random.choice(node_ips), c, t))
+                r = requests.get(u, headers=header, verify=False, timeout=15).json()
+                ls = r['status']
+                if ls == "SUCCEEDED":
+                    if lm_queued:
+                        m['pending_livemounts'] -= 1
+                    logging.info("{} - LM {} - {} - {} - {} ".format(
+                        v, r['status'], r['nodeId'], r['startTime'], r['endTime']))
+                    m['successful_livemount'] += 1
+                    if config['svm']:
+                        for i in r['links']:
+                            if i['rel'] == 'result':
+                                o = requests.get(i['href'], headers=header, verify=False, timeout=15).json()
+                                return o['id'], o['mountedVmId']
+                if "FAIL" in ls:
+                    if 'Failed to create NAS datastore' in json.dumps(r['error']):
+                        if config['nfs_wait']:
+                            lm_active = False
+                            r['status'] = "WAIT"
+                            m['nfs_limit_wait'] += 1
+                            time.sleep(30)
+                        else:
+                            lm_active = True
+                            m['nfs_limit_fail'] += 1
+                    else:
+                        m['failed_operations'] += 1
+                        logging.error(r['error'])
+                        lm_active = True
+                    logging.error(
+                        "{} - LM {} ({}) - Start ({}) - End ({})".
+                            format(v, r['status'], r['nodeId'], r['startTime'],
+                                   r['endTime']))
+                    lm_complete = True
+                time.sleep(3)
     return 0
 
 
 def export_vm(v, si, hi, di, h):
-    print("In Export")
     c = "/api/v1/vmware/vm/snapshot"
     lo = {
         "disableNetwork": False,
@@ -446,29 +463,28 @@ def export_vm(v, si, hi, di, h):
     r = requests.post(u, json=lo, headers=header, verify=False,
                       timeout=15).json()
     t = r['id']
-    s = False
-    ls = ""
-    while not s:
+    export_complete = False
+    while not export_complete:
         c = "/api/v1/vmware/vm/request"
         u = ("{}{}/{}".format(random.choice(node_ips), c, t))
         r = requests.get(u, headers=header, verify=False, timeout=15).json()
         ls = r['status']
         if ls == "SUCCEEDED":
-            logging.info("{} - EXPORT SUCCEED - {} - {} - {} - {} - {}".format(
+            logging.info("{} - EXPORT SUCCEED - {} - {} - {} - {}".format(
                 v, r['nodeId'], h, r['startTime'], r['endTime']))
             if r['nodeId'] not in rn:
                 rn[r['nodeId']] = 1
             else:
                 rn[r['nodeId']] += 1
             m['successful_recovery'] += 1
-            s = True
+            export_complete = True
         if "FAIL" in ls:
             logging.error(
-                "{} - Export FAIL - {} ({}) - Start ({}) - End ({})".format(
+                "{} - Export FAIL - {} - Start ({}) - End ({})".format(
                     v, r['nodeId'], r['startTime'], r['endTime']))
             logging.error(r['error'])
             m['failed_operations'] += 1
-            s = True
+            export_complete = True
         time.sleep(5)
     return
 
@@ -500,6 +516,7 @@ def get_snapshot_id(vin):
     return myrc[close]['id'], myrc[close]['vmid']
 
 
+# Dumps some useful metrics at the end.
 def print_m(m):
     print("\n Job Statistics:")
     for i in m:
@@ -548,14 +565,19 @@ if __name__ == '__main__':
         data = data[0:config['limit']]
     print(" - Done")
 
+    if 'livemount' not in config['function']:
+        config['svm'] = False
+
     # start the svm processor
+    svm_threads = []
     if config['svm']:
         svm_vm = Queue()
-        svm_threads = []
+        if len(data) < config['svm_threads']:
+            config['svm_threads'] = len(data)
         for i in range(config['svm_threads']):
             svm_process = Thread(target=relocate_vm, args=(svm_vm,))
             svm_threads.append(svm_process)
-        #    svm_process.setDaemon(True)
+            svm_process.setDaemon(True)
             svm_process.start()
 
     # Run the recoveries
@@ -569,21 +591,19 @@ if __name__ == '__main__':
     m['end_time'] = endTime
     print('')
 
+    # Put some output for the remaining SVM
     if config['svm']:
-        while not svm_vm.empty():
-            main_thread = threading.current_thread()
-            s = "Storage vMotion: ({} Complete,  {} Running,  {} Queued)".format(m['successful_relocate'], m['active_svm'], svm_vm.qsize())
+        while True:
+            s = "Storage vMotion: ({} Complete,  {} Running,  {} Queued) Livemounts Active: {}".format(m['successful_relocate'], m['active_svm'], svm_vm.qsize(), m['active_livemounts'])
             sys.stdout.write(s + "\r")
             sys.stdout.flush()
-            time.sleep(1)
-
-        for s in svm_threads:
-            s.join()
-
-        if svm_vm.empty():
-            s = "Storage vMotion: ({} Complete,  {} Running,  {} Queued)".format(m['successful_relocate'], m['active_svm'], svm_vm.qsize())
-            sys.stdout.write(s + "\n")
-            print("Relocation Complete")
+            if m['active_svm'] or m['active_livemounts'] or m['pending_livemounts'] or svm_vm.qsize():
+                time.sleep(1)
+            else:
+                break
+        for svm_thread in svm_threads:
+            svm_thread.join(0)
+        print()
 
     print_m(m)
 
@@ -593,4 +613,4 @@ if __name__ == '__main__':
     for h in recoveries:
         logging.info("Recoveries Serviced {} - {}".format(h, recoveries[h]))
 
-exit()
+    exit()
