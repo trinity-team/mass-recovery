@@ -32,7 +32,7 @@ Running Recovery
 
 ```
 {
-  "threads": 3,
+  "function_threads": 3,
   "limit": 5,
   "in_file": "in_data.csv",
   "function": 'livemount',
@@ -50,7 +50,7 @@ Running Recovery
 }
 ```
 ### Mandatory Configuration -
-- threads (int) - number of simultaneous operations
+- function_threads (int) - number of simultaneous operations
 - in_file (str) - relative path to input file
 - function (str) - one of - export/livemount/unmount/dryrun 
 - rubrik_host (str) - ip/fqdn of Rubrik node
