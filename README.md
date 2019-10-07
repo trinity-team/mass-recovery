@@ -67,6 +67,7 @@ Running Recovery
 - nfs_wait (bool) - wait for NFS datastore availablity (play nice with vmware)
     Note: This will show a failure in vCenter with a subsequent success
 - max_livemounts (int) - set an explicit number of concurrent NFS mounts, another way to play nice with VMware
+- balance_livemounts (bool) - set with livemount to balance over vSphere cluster instead of using previous host
 - svm (bool) - set with livemount so that we sVM machines upon mount to original datastore
 - svm_threads (int) - set with livemount to put a concurrency on running sVM 
 - power_on (bool) - set to power machines on upon exposure to vSphere
