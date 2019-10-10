@@ -47,6 +47,8 @@ if 'power_on' not in config:
 else:
     config['power_on'] = True
 
+ds_filter = False
+
 sla = "Bronze"
 rubrik_serviced = {}
 esx_serviced = {}
@@ -294,8 +296,9 @@ def get_datastore_map():
         u = ("{}{}".format(random.choice(node_ips), c))
         r = requests.get(u, headers=header, verify=False, timeout=60).json()
         for z in r['data']:
-            if "PURE" not in z['name']:
-                continue
+            if ds_filter:
+                if "PURE" not in z['name']:
+                    continue
             print("Getting for {} ".format(z['name']), end='')
             cc = "/api/internal/vmware/datastore/"
             uu = ("{}{}{}".format(random.choice(node_ips), cc, z['id']))
@@ -315,7 +318,7 @@ def get_datastore_map():
 # Returns vm_id from vm_name
 def get_vm_id(v):
     c = "/api/v1/vmware/vm"
-    u = ("{}{}?name={}".format(random.choice(node_ips), c,
+    u = ("{}{}?primary_cluster_id=local&is_relic=false&name={}".format(random.choice(node_ips), c,
                                urllib.parse.quote(v)))
     r = requests.get(u, headers=header, verify=False, timeout=config['small_timeout']).json()
     for response in r['data']:
@@ -394,7 +397,7 @@ def relocate_vm(vm):
         except Exception as e:
             print(e)
         svm_end = timer()
-        kpi['svm_threads'].append(svm_end - svm_start)
+        kpi['svm_thread'].append(svm_end - svm_start)
         m['active_svm'] -= 1
 
 
@@ -461,7 +464,7 @@ def livemount_vm(v, si, hi=''):
                                                          timeout=config['small_timeout']).json()
                                         for event_detail in n['eventDetailList']:
                                             event_info = json.loads(event_detail['eventInfo'])
-                                            if config['audit_full']:
+                                            if 'audit_full' in config and config['audit_full']:
                                                 logging.info("{} - LM AUDIT - {} - {}".format(
                                                     v, event_detail['time'], event_info['message']))
                                             else:
