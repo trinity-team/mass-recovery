@@ -385,7 +385,7 @@ def relocate_vm(vm):
                                 m['successful_relocate'] += 1
                                 m['active_livemounts'] -= 1
                                 this_svm_complete = True
-                            elif "Fail" in result['eventStatus']:
+                            elif "FAIL" in result['eventStatus']:
                                 logging.error(
                                     "{} - SVM FAIL - {} ({})".format(svm_object['vmName'], svm_object['datastoreName'],
                                                                      svm_object['datastoreId']))
