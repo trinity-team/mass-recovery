@@ -62,6 +62,7 @@ Running Recovery
 
 ### Optional Configuration
 - limit (int) - how many records to use from input file, useful for testing
+- detailed_audit (bool) - will log Rubrik events inline
 - omit_hosts (arr/str) - esx hosts that we don't want to export to
 - show_progress (bool) - set to true to have an idea of progress
 - nfs_wait (bool) - wait for NFS datastore availablity (play nice with vmware)

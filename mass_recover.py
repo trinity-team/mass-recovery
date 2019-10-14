@@ -45,7 +45,6 @@ if 'power_on' not in config:
 
 ds_filter = False
 
-sla = "Bronze"
 rubrik_serviced = {}
 esx_serviced = {}
 svm_vm = {}
@@ -116,10 +115,11 @@ def run_threads(data, thread_count, function):
     while not pool_instance.ready():
         if 'svm' in config and config['svm']:
             summary = "Storage vMotion ({} Complete,  {} Running,  {} Queued)".format(m['successful_relocate'],
-                                                                                m['active_svm'], svm_vm.qsize())
+                                                                                      m['active_svm'], svm_vm.qsize())
         else:
             summary = ''
-        progress((total_tasks - pool_instance._number_left), total_tasks, "({} of {})".format(total_tasks - pool_instance._number_left, total_tasks), summary)
+        progress((total_tasks - pool_instance._number_left), total_tasks,
+                 "({} of {})".format(total_tasks - pool_instance._number_left, total_tasks), summary)
     thread_pool.close()
     thread_pool.join()
 
@@ -200,7 +200,7 @@ def run_function(vm):
         exit
 
 
-# Returns OK Rubrik Nodes
+# Returns OK Rubrik Nodes IPs
 def get_ips(initial_ip):
     node_ip_array = []
     endpoint = "/api/internal/node"
@@ -230,7 +230,7 @@ def get_vm_structure():
         uri = ("{}{}?limit=999&primary_cluster_id=local".format(
             random.choice(node_ips), endpoint))
         response = requests.get(uri, headers=header, verify=False,
-                               timeout=30).json()
+                                timeout=30).json()
         for response in response['data']:
             infra_data[response['name']] = {'id': response['id']}
             call = "/api/v1/vmware/compute_cluster"
@@ -313,7 +313,7 @@ def get_datastore_map():
 def get_vm_id(vm_id):
     endpoint = "/api/v1/vmware/vm"
     uri = ("{}{}?primary_cluster_id=local&is_relic=false&name={}".format(random.choice(node_ips), endpoint,
-                                                                       urllib.parse.quote(vm_id)))
+                                                                         urllib.parse.quote(vm_id)))
     response = requests.get(uri, headers=header, verify=False, timeout=config['small_timeout']).json()
     for response in response['data']:
         if response['name'] == vm_id:
@@ -395,9 +395,8 @@ def relocate_vm(input_queue):
                                                         timeout=config['small_timeout']).json()
                                 for event_detail in response['eventDetailList']:
                                     event_info = json.loads(event_detail['eventInfo'])
-                                    if 'detailed_audit_full' in config and config['detailed_audit_full']:
-                                        logging.info("{} - SVM AUDIT - {} - {}".format(
-                                            svm_object['vmName'], event_detail['time'], event_info['message']))
+                                    logging.info("{} - SVM AUDIT - {} - {}".format(
+                                        svm_object['vmName'], event_detail['time'], event_info['message']))
                 except Exception as e:
                     logging.error(traceback.print_exc())
                     m['active_svm'] -= 1
@@ -439,7 +438,7 @@ def livemount_vm(vm_name, snapshot_id, host_id=''):
                 payload['vmName'] = "{}{}".format(config['prefix'], vm_name)
             uri = ("{}{}/{}/mount".format(random.choice(node_ips), endpoint, snapshot_id))
             response = requests.post(uri, json=payload, headers=header, verify=False,
-                              timeout=config['small_timeout']).json()
+                                     timeout=config['small_timeout']).json()
             request_id = response['id']
             lm_complete = False
             while not lm_complete:
@@ -466,7 +465,7 @@ def livemount_vm(vm_name, snapshot_id, host_id=''):
                         overhead_delta = 0
                         if returned_links['rel'] == 'result':
                             request_detail = requests.get(returned_links['href'], headers=header, verify=False,
-                                             timeout=config['small_timeout']).json()
+                                                          timeout=config['small_timeout']).json()
                             # Grabs portions of event log of interest
                             if 'detailed_audit' in config and config['detailed_audit']:
                                 overhead_begin = timer()
@@ -474,22 +473,18 @@ def livemount_vm(vm_name, snapshot_id, host_id=''):
                                 uri = ("{}{}?limit=20&status=Success&event_type=Recovery&object_ids={}".format(
                                     random.choice(node_ips), endpoint, request_detail['vmId']))
                                 response = requests.get(uri, headers=header, verify=False,
-                                                 timeout=config['small_timeout']).json()
+                                                        timeout=config['small_timeout']).json()
                                 for event_data in response['data']:
                                     if event_data['jobInstanceId'] == request_id:
                                         endpoint = "/api/internal/event_series"
-                                        uri = ("{}{}/{}".format(random.choice(node_ips), endpoint, event_data['eventSeriesId']))
+                                        uri = ("{}{}/{}".format(random.choice(node_ips), endpoint,
+                                                                event_data['eventSeriesId']))
                                         response = requests.get(uri, headers=header, verify=False,
-                                                         timeout=config['small_timeout']).json()
+                                                                timeout=config['small_timeout']).json()
                                         for event_detail in response['eventDetailList']:
                                             event_info = json.loads(event_detail['eventInfo'])
-                                            if 'detailed_audit_full' in config and config['detailed_audit_full']:
-                                                logging.info("{} - LM AUDIT - {} - {}".format(
-                                                    vm_name, event_detail['time'], event_info['message']))
-                                            else:
-                                                if 'seconds' in event_info['message']:
-                                                    logging.info("{} - LM AUDIT - {}".format(
-                                                        vm_name, re.sub(' (.* seconds)\'', '\1', event_info['message'])))
+                                            logging.info("{} - LM AUDIT - {} - {}".format(
+                                                vm_name, event_detail['time'], event_info['message']))
                                 overhead_delta = (timer() - overhead_begin)
                             livemount_end = timer()
                             kpi['livemount_thread'].append(livemount_end - livemount_start)
@@ -533,7 +528,7 @@ def export_vm(vm_name, snapshot_id, host_id, datastore_id, host_name):
         payload['vmName'] = "{}".format(vm_name)
     uri = ("{}{}/{}/export".format(random.choice(node_ips), endpoint, snapshot_id))
     response = requests.post(uri, json=payload, headers=header, verify=False,
-                      timeout=config['small_timeout']).json()
+                             timeout=config['small_timeout']).json()
     request_id = response['id']
     export_complete = False
     while not export_complete:
@@ -582,7 +577,9 @@ def get_snapshot_id(vm_id):
                 snapshot_date_comparison[delta]['dt'] = snap['date']
     closest_snapshot_date = min(snapshot_date_comparison)
     logging.info(
-        "{} - RP SUCCEED - Snap {} - RP {}".format(response['name'], snapshot_date_comparison[closest_snapshot_date]['dt'], recovery_point))
+        "{} - RP SUCCEED - Snap {} - RP {}".format(response['name'],
+                                                   snapshot_date_comparison[closest_snapshot_date]['dt'],
+                                                   recovery_point))
     return snapshot_date_comparison[closest_snapshot_date]['id']
 
 
