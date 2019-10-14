@@ -1,5 +1,4 @@
 import requests
-import re
 import sys
 import time
 import random
@@ -11,6 +10,7 @@ import os
 import traceback
 import statistics
 import pytz
+import urllib3
 from timeit import default_timer as timer
 from multiprocessing.pool import ThreadPool
 from threading import Thread
@@ -18,7 +18,6 @@ from queue import Queue
 from dateutil.parser import parse
 from datetime import datetime
 from gc import collect as gc
-import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
