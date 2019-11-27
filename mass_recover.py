@@ -19,7 +19,6 @@ from dateutil.parser import parse
 from datetime import datetime
 from gc import collect as gc
 
-
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 try:
