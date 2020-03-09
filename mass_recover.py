@@ -192,7 +192,8 @@ def run_function(vm):
                 logging.error(e)
         thread_end = timer()
         kpi['main_thread'].append(thread_end - thread_begin)
-        kpi['function_thread'].append((thread_end - function_begin) - overhead_delta)
+        if overhead_delta:
+            kpi['function_thread'].append((thread_end - function_begin) - overhead_delta)
         gc()
     except Exception as e:
         logging.exception(traceback.print_exc())
@@ -293,7 +294,7 @@ def get_datastore_map():
             if ds_filter:
                 if "PURE" not in datastore['name']:
                     continue
-            print("Getting for {} ".format(response['name']), end='')
+            print("Getting for {} ".format(datastore['name']), end='')
             endpoint = "/api/internal/vmware/datastore/"
             uri = ("{}{}{}".format(random.choice(node_ips), endpoint, datastore['id']))
             response = requests.get(uri, headers=header, verify=False, timeout=90).json()
@@ -317,6 +318,14 @@ def get_vm_id(vm_id):
     for response in response['data']:
         if response['name'] == vm_id:
             return response['id'], response['clusterName']
+    uri = ("{}{}?primary_cluster_id=local&name={}".format(random.choice(node_ips), endpoint,
+                                                                         urllib.parse.quote(vm_id)))
+    response = requests.get(uri, headers=header, verify=False, timeout=config['small_timeout']).json()
+    for response in response['data']:
+        if response['name'] == vm_id:
+            return response['id'], ''
+    print(uri)
+
 
 
 def livemount_table():
