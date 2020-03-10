@@ -1,0 +1,10 @@
+{
+  "function_threads": 3,
+  "in_file": "manan.csv",
+  "function": "export",
+  "limit": 1,
+  "rubrik_host": "172.22.8.63",
+  "rubrik_key": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJlMWIzOTRjMS00YWNmLTQ0OTAtYjNiMi1mMDU2NGQzMTIyYTgiLCJpc3MiOiJlYjhmOWQ1MS00YTk0LTQ3ZjMtOThkMS0xMzZjOGI3NmQ3YjkiLCJqdGkiOiIxNmIxNjQ3ZC0yZWQ2LTQ4MTEtYWFlNS05NGFiODEwNGFjOTgifQ.aUZP3Va7hKCboON1e-dsDa6L_cT5onu2UPdeY68kzE0",
+  "show_progress": true,
+  "prefix": "peterm-test-"
+}
