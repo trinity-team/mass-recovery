@@ -10,6 +10,7 @@ import os
 import traceback
 import statistics
 import pytz
+import pprint
 import urllib3
 from timeit import default_timer as timer
 from multiprocessing.pool import ThreadPool
@@ -18,8 +19,9 @@ from queue import Queue
 from dateutil.parser import parse
 from datetime import datetime
 from gc import collect as gc
-
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+pp = pprint.PrettyPrinter(indent=4)
 
 try:
     config = json.load(open(sys.argv[1]))
@@ -35,6 +37,9 @@ if 'limit' not in config:
 
 if 'small_timeout' not in config:
     config['small_timeout'] = 60
+
+if 'max_livemounts' not in config:
+    config['max_livemounts'] = 10
 
 if 'detailed_audit' not in config:
     config['detailed_audit'] = False
@@ -71,7 +76,8 @@ m = {
     "pending_livemounts": 0,
     "can_be_recovered": 0,
     "successful_recovery": 0,
-    "successful_livemount": 0,
+    "successful_livemounts": 0,
+    "failed_livemounts": 0,
     "successful_relocate": 0,
     "nfs_limit_wait": 0,
     "livemount_limit_wait": 0,
@@ -125,11 +131,12 @@ def run_threads(data, thread_count, function):
 
 # Main Worker Process
 def run_function(vm):
+    overhead_delta = 0
     try:
         thread_begin = timer()
         host_id = 0
         host_name = 0
-        vm_id, cluster_name = get_vm_id(vm['Object Name'])
+        snap_id, cluster_name, vm_id = get_snapshot_id(vm['Object Name'])
         if config['function'] == 'unmount':
             unmount_vm(vm['Object Name'], vm_id)
             return
@@ -138,7 +145,6 @@ def run_function(vm):
                 vm['Object Name']))
             m['vm_not_found'] += 1
             return
-        snap_id = get_snapshot_id(vm_id)
         if snap_id is None:
             logging.warning("{} - Snapshot not found for VM".format(
                 vm['Object Name']))
@@ -162,10 +168,14 @@ def run_function(vm):
         m['can_be_recovered'] += 1
         function_begin = timer()
         if config['function'] == 'livemount':
+            svm_obj = ''
             logging.info("{} - LM QUEUED - {} to {}".format(
                 vm['Object Name'], snap_id, host_name))
-            mount_id, mounted_vm_id, overhead_delta = livemount_vm(vm['Object Name'], snap_id, host_id)
-            svm_obj = {mount_id: {}}
+            try:
+                mount_id, mounted_vm_id, overhead_delta = livemount_vm(vm['Object Name'], snap_id, host_id)
+                svm_obj = {mount_id: {}}
+            except:
+                logging.error("{} - FAILED LIVEMOUNT - {} - {}".format(vm['Object Name'], snap_id, host_id))
             if 'svm' in config and config['svm']:
                 ds = get_vdisk_id(vm_id)
                 di = datastore_map[ds]
@@ -177,6 +187,7 @@ def run_function(vm):
                 svm_obj['vmName'] = vm['Object Name']
                 svm_vm.put(svm_obj)
         elif config['function'] == 'export':
+            overhead_delta = 0
             di = datastore_map[get_vdisk_id(vm_id)][1]
             if di is None:
                 logging.error("{} - No Datastore found in cache".format(
@@ -196,7 +207,6 @@ def run_function(vm):
         gc()
     except Exception as e:
         logging.exception(traceback.print_exc())
-        exit
 
 
 # Returns OK Rubrik Nodes IPs
@@ -293,7 +303,7 @@ def get_datastore_map():
             if ds_filter:
                 if "PURE" not in datastore['name']:
                     continue
-            print("Getting for {} ".format(response['name']), end='')
+            print("Getting for {} ".format(datastore['name']), end='')
             endpoint = "/api/internal/vmware/datastore/"
             uri = ("{}{}{}".format(random.choice(node_ips), endpoint, datastore['id']))
             response = requests.get(uri, headers=header, verify=False, timeout=90).json()
@@ -306,17 +316,6 @@ def get_datastore_map():
         with open(ds_file, 'w') as o:
             json.dump(datastore_info, o, indent=4, sort_keys=True)
     return datastore_info
-
-
-# Returns vm_id from vm_name
-def get_vm_id(vm_id):
-    endpoint = "/api/v1/vmware/vm"
-    uri = ("{}{}?primary_cluster_id=local&is_relic=false&name={}".format(random.choice(node_ips), endpoint,
-                                                                         urllib.parse.quote(vm_id)))
-    response = requests.get(uri, headers=header, verify=False, timeout=config['small_timeout']).json()
-    for response in response['data']:
-        if response['name'] == vm_id:
-            return response['id'], response['clusterName']
 
 
 def livemount_table():
@@ -440,6 +439,7 @@ def livemount_vm(vm_name, snapshot_id, host_id=''):
                                      timeout=config['small_timeout']).json()
             request_id = response['id']
             lm_complete = False
+            lm_failed = False
             while not lm_complete:
                 time.sleep(3)
                 endpoint = "/api/v1/vmware/vm/request"
@@ -454,7 +454,7 @@ def livemount_vm(vm_name, snapshot_id, host_id=''):
                         rubrik_serviced[response['nodeId']] += 1
                     if lm_queued:
                         m['pending_livemounts'] -= 1
-                    m['successful_livemount'] += 1
+                    m['successful_livemounts'] += 1
                     lm_complete = True
                     lm_active = True
                     logging.info("{} - LM {} - {} - {} - {} - {}".format(
@@ -488,7 +488,7 @@ def livemount_vm(vm_name, snapshot_id, host_id=''):
                             livemount_end = timer()
                             kpi['livemount_thread'].append(livemount_end - livemount_start)
                             return request_detail['id'], request_detail['mountedVmId'], overhead_delta
-                if "FAIL" in response['status']:
+                if response['status'] == 'FAILED':
                     if 'Failed to create NAS datastore' in json.dumps(response['error']):
                         if 'nfs_wait' in config and config['nfs_wait']:
                             response['status'] = "WAIT"
@@ -499,13 +499,16 @@ def livemount_vm(vm_name, snapshot_id, host_id=''):
                             m['nfs_limit_fail'] += 1
                             lm_active = True
                     else:
-                        m['failed_operations'] += 1
+                        m['failed_livemounts'] += 1
+                        lm_complete = True
+                        lm_failed = True
                     logging.error(
                         "{} - LM {} ({}) - Start ({}) - End ({})".
                             format(vm_name, response['status'], response['nodeId'], response['startTime'],
                                    response['endTime']))
                     logging.error(response['error']['message'])
-                    lm_complete = True
+                    if lm_failed:
+                        return 0
     return 0
 
 
@@ -557,29 +560,47 @@ def export_vm(vm_name, snapshot_id, host_id, datastore_id, host_name):
 
 # Returns latest snap_id from vm_id - if config['recovery_point'] then find closest to time without going over
 # 2019-09-15T07:02:54.470Z
-def get_snapshot_id(vm_id):
+def get_snapshot_id(vm_name):
     snapshot_date_comparison = {}
+    closest_snapshot_date = ''
     if 'recovery_point' in config:
         recovery_point = pytz.utc.localize(parse(config['recovery_point']))
     else:
         recovery_point = pytz.utc.localize(datetime.now())
-    endpoint = "/api/v1/vmware/vm/"
-    uri = ("{}{}{}".format(random.choice(node_ips), endpoint, urllib.parse.quote(vm_id)))
-    response = requests.get(uri, headers=header, verify=False, timeout=config['small_timeout']).json()
-    if response['snapshotCount'] > 0:
-        for snap in response['snapshots']:
-            snapshot_date = parse(snap['date'])
-            if recovery_point > snapshot_date:
-                delta = abs(recovery_point - snapshot_date)
-                snapshot_date_comparison[delta] = {}
-                snapshot_date_comparison[delta]['id'] = snap['id']
-                snapshot_date_comparison[delta]['dt'] = snap['date']
-    closest_snapshot_date = min(snapshot_date_comparison)
+    endpoint = "/api/v1/vmware/vm"
+    uri = ("{}{}?primary_cluster_id=local&name={}".format(random.choice(node_ips), endpoint,
+                                                                         urllib.parse.quote(vm_name)))
+    res = requests.get(uri, headers=header, verify=False, timeout=config['small_timeout']).json()
+    for vm_response in res['data']:
+        if vm_response['name'] == vm_name:
+            endpoint = "/api/v1/vmware/vm/"
+            uri = ("{}{}{}".format(random.choice(node_ips), endpoint, urllib.parse.quote(vm_response['id'])))
+            response = requests.get(uri, headers=header, verify=False, timeout=config['small_timeout']).json()
+            if response['snapshotCount'] > 0:
+                for snap in response['snapshots']:
+                    snapshot_date = parse(snap['date'])
+                    if recovery_point > snapshot_date:
+                        delta = abs(recovery_point - snapshot_date)
+                        snapshot_date_comparison[delta] = {}
+                        snapshot_date_comparison[delta]['id'] = snap['id']
+                        snapshot_date_comparison[delta]['vm_id'] = vm_response['id']
+                        snapshot_date_comparison[delta]['vm_name'] = vm_response['name']
+                        snapshot_date_comparison[delta]['dt'] = snap['date']
+                        try:
+                            snapshot_date_comparison[delta]['cn'] = vm_response['clusterName']
+                        except:
+                            snapshot_date_comparison[delta]['cn'] = ''
+    if snapshot_date_comparison:
+        closest_snapshot_date = min(snapshot_date_comparison)
+    else:
+        return
     logging.info(
-        "{} - RP SUCCEED - Snap {} - RP {}".format(response['name'],
+        "{} - RP SUCCEED - Snap {} - RP {}".format(snapshot_date_comparison[closest_snapshot_date]['vm_name'],
                                                    snapshot_date_comparison[closest_snapshot_date]['dt'],
                                                    recovery_point))
-    return snapshot_date_comparison[closest_snapshot_date]['id']
+    return snapshot_date_comparison[closest_snapshot_date]['id'],  \
+           snapshot_date_comparison[closest_snapshot_date]['cn'], \
+           snapshot_date_comparison[closest_snapshot_date]['vm_id']
 
 
 # Dumps some useful metrics at the end.
