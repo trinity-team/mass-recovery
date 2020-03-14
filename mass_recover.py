@@ -124,7 +124,8 @@ def run_threads(data, thread_count, function):
                                                                                       m['active_svm'], svm_vm.qsize())
         elif 'function' in config and config['function']== "export":
             summary = "Exports ({} Complete,  {} Running,  {} Queued)".format(total_tasks - pool_instance._number_left,
-                                                                                  m['active_exports'], pool_instance._number_left)
+                                                                       m['active_exports'],
+                                                                       pool_instance._number_left - m['active_exports'])
         else:
             summary = ''
         progress((total_tasks - pool_instance._number_left), total_tasks,
@@ -149,7 +150,7 @@ def run_function(vm):
                 vm['Object Name']))
             m['vm_not_found'] += 1
             return
-        if snap_id == '':
+        if snap_id == 'NOT_FOUND':
             logging.warning("{} - Snapshot not found for VM".format(
                 vm['Object Name']))
             m['snap_not_found'] += 1
@@ -607,6 +608,8 @@ def get_snapshot_id(vm_name):
                             snapshot_date_comparison[delta]['cn'] = vm_response['clusterName']
                         except:
                             snapshot_date_comparison[delta]['cn'] = ''
+            else:
+                return 'NOT_FOUND', vm_response['clusterName'], vm_response['id']
     if snapshot_date_comparison:
         closest_snapshot_date = min(snapshot_date_comparison)
     else:
