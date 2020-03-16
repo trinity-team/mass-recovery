@@ -70,7 +70,9 @@ logging.basicConfig(
 m = {
     "snap_not_found": 0,
     "vm_not_found": 0,
+    "rubrik_concurrent_exports": 0,
     "active_svm": 0,
+    "active_exports": 0,
     "active_livemounts": 0,
     "kill_threads": 0,
     "pending_livemounts": 0,
@@ -121,6 +123,10 @@ def run_threads(data, thread_count, function):
         if 'svm' in config and config['svm']:
             summary = "Storage vMotion ({} Complete,  {} Running,  {} Queued)".format(m['successful_relocate'],
                                                                                       m['active_svm'], svm_vm.qsize())
+        elif 'function' in config and config['function']== "export":
+            summary = "Exports ({} Complete,  {} Running,  {} Queued)".format(total_tasks - pool_instance._number_left,
+                                                                       m['active_exports'],
+                                                                       pool_instance._number_left - m['active_exports'])
         else:
             summary = ''
         progress((total_tasks - pool_instance._number_left), total_tasks,
@@ -140,12 +146,12 @@ def run_function(vm):
         if config['function'] == 'unmount':
             unmount_vm(vm['Object Name'], vm_id)
             return
-        if vm_id is None:
+        if vm_id is "NOT_FOUND":
             logging.warning("{} - VM Not Found on Rubrik".format(
                 vm['Object Name']))
             m['vm_not_found'] += 1
             return
-        if snap_id is None:
+        if snap_id == 'NOT_FOUND':
             logging.warning("{} - Snapshot not found for VM".format(
                 vm['Object Name']))
             m['snap_not_found'] += 1
@@ -214,7 +220,10 @@ def get_ips(initial_ip):
     node_ip_array = []
     endpoint = "/api/internal/node"
     uri = ("https://{}{}".format(initial_ip, endpoint))
-    response = requests.get(uri, headers=header, verify=False, timeout=config['small_timeout']).json()
+    response = requests.get(uri, headers=header, verify=False, timeout=config['small_timeout'])
+    if response.status_code >= 400:
+        raise SystemExit('Authentication to {} failed, please check your API Token'.format(initial_ip))
+    response = response.json()
     for node in response['data']:
         if node['status'] == "OK":
             node_ip_array.append("https://{}".format(node['ipAddress']))
@@ -303,7 +312,7 @@ def get_datastore_map():
             if ds_filter:
                 if "PURE" not in datastore['name']:
                     continue
-            print("Getting for {} ".format(datastore['name']), end='')
+            # print("Getting for {} ".format(datastore['name']), end='')
             endpoint = "/api/internal/vmware/datastore/"
             uri = ("{}{}{}".format(random.choice(node_ips), endpoint, datastore['id']))
             response = requests.get(uri, headers=header, verify=False, timeout=90).json()
@@ -312,7 +321,7 @@ def get_datastore_map():
                     print('.', end='')
                     if virtual_disk['id'] not in datastore_info:
                         datastore_info[virtual_disk['id']] = [datastore['name'], datastore['id']]
-            print("Done")
+            # print("Done")
         with open(ds_file, 'w') as o:
             json.dump(datastore_info, o, indent=4, sort_keys=True)
     return datastore_info
@@ -513,56 +522,94 @@ def livemount_vm(vm_name, snapshot_id, host_id=''):
 
 
 def export_vm(vm_name, snapshot_id, host_id, datastore_id, host_name):
-    endpoint = "/api/v1/vmware/vm/snapshot"
-    payload = {
-        "disableNetwork": False,
-        "removeNetworkDevices": False,
-        "powerOn": config['power_on'],
-        "keepMacAddresses": True,
-        "hostId": "{}".format(host_id),
-        "datastoreId": "{}".format(datastore_id),
-        "unregisterVm": False,
-        "shouldRecoverTags": True
-    }
-    if 'prefix' in config:
-        payload['vmName'] = "{}{}".format(config['prefix'], vm_name)
-    else:
-        payload['vmName'] = "{}".format(vm_name)
-    uri = ("{}{}/{}/export".format(random.choice(node_ips), endpoint, snapshot_id))
-    response = requests.post(uri, json=payload, headers=header, verify=False,
-                             timeout=config['small_timeout']).json()
-    request_id = response['id']
-    export_complete = False
-    while not export_complete:
-        endpoint = "/api/v1/vmware/vm/request"
-        uri = ("{}{}/{}".format(random.choice(node_ips), endpoint, request_id))
-        response = requests.get(uri, headers=header, verify=False, timeout=config['small_timeout']).json()
-        ls = response['status']
-        if ls == "SUCCEEDED":
-            logging.info("{} - EXPORT SUCCEED - {} - {} - {} - {}".format(
-                vm_name, response['nodeId'], host_name, response['startTime'], response['endTime']))
-            if response['nodeId'] not in rubrik_serviced:
-                rubrik_serviced[response['nodeId']] = 1
-            else:
-                rubrik_serviced[response['nodeId']] += 1
-            m['successful_recovery'] += 1
-            export_complete = True
-        if "FAIL" in ls:
-            logging.error(
-                "{} - Export FAIL - {} - Start ({}) - End ({})".format(
-                    vm_name, response['nodeId'], response['startTime'], response['endTime']))
-            logging.error(response['error'])
-            m['failed_operations'] += 1
-            export_complete = True
-        time.sleep(3)
-    return
+    try:
+        endpoint = "/api/v1/vmware/vm/snapshot"
+        payload = {
+            "disableNetwork": False,
+            "removeNetworkDevices": False,
+            "powerOn": config['power_on'],
+            "keepMacAddresses": True,
+            "hostId": "{}".format(host_id),
+            "datastoreId": "{}".format(datastore_id),
+            "unregisterVm": False,
+            "shouldRecoverTags": True
+        }
+        if 'prefix' in config:
+            payload['vmName'] = "{}{}".format(config['prefix'], vm_name)
+        else:
+            payload['vmName'] = "{}".format(vm_name)
+        uri = ("{}{}/{}/export".format(random.choice(node_ips), endpoint, snapshot_id))
+        response = requests.post(uri, json=payload, headers=header, verify=False,
+                                 timeout=config['small_timeout']).json()
+        request_id = response['id']
+        export_complete = False
+        ls = ''
+        while not export_complete:
+            endpoint = "/api/v1/vmware/vm/request"
+            uri = ("{}{}/{}".format(random.choice(node_ips), endpoint, request_id))
+            response = requests.get(uri, headers=header, verify=False, timeout=config['small_timeout']).json()
+            if "RUN" in response['status'] and ls != response['status'] :
+                logging.info("{} - EXPORT RUNNING - {} - {} - {} ".format(
+                    vm_name, response['nodeId'], host_name, response['startTime']))
+                m['active_exports'] += 1
+                if m['active_exports'] > m['rubrik_concurrent_exports']:
+                   m['rubrik_concurrent_exports'] = m['active_exports']
+                ls = response['status']
+            if "SUCC" in response['status']:
+                logging.info("{} - EXPORT SUCCEED - {} - {} - {} - {}".format(
+                    vm_name, response['nodeId'], host_name, response['startTime'], response['endTime']))
+                if response['nodeId'] not in rubrik_serviced:
+                    rubrik_serviced[response['nodeId']] = 1
+                else:
+                    rubrik_serviced[response['nodeId']] += 1
+                m['successful_recovery'] += 1
+                export_complete = True
+                m['active_exports'] -= 1
+                if 'detailed_audit' in config and config['detailed_audit']:
+                    for returned_links in response['links']:
+                        overhead_delta = 0
+                        if returned_links['rel'] == 'result': # here
+                            request_detail = requests.get(returned_links['href'], headers=header, verify=False,
+                                                          timeout=config['small_timeout']).json()
+                            overhead_begin = timer()
+                            endpoint = "/api/internal/event"
+                            uri = ("{}{}?limit=20&object_ids={}".format(
+                                random.choice(node_ips), endpoint, request_detail['id']))
+                            response = requests.get(uri, headers=header, verify=False,
+                                                    timeout=config['small_timeout']).json()
+                            for event_data in response['data']:
+                                if event_data['jobInstanceId'] == request_id:
+                                    endpoint = "/api/internal/event_series"
+                                    uri = ("{}{}/{}".format(random.choice(node_ips), endpoint,
+                                                            event_data['eventSeriesId']))
+                                    response = requests.get(uri, headers=header, verify=False,
+                                                            timeout=config['small_timeout']).json()
+                                    for event_detail in response['eventDetailList']:
+                                        event_info = json.loads(event_detail['eventInfo'])
+                                        logging.info("{} - EXPORT AUDIT - {} - {}".format(
+                                            vm_name, event_detail['time'], event_info['message']))
+                            overhead_delta = (timer() - overhead_begin)
+            if 'status' in response and "FAI" in response['status']:
+                logging.error(
+                    "{} - Export FAIL - {} - Start ({}) - End ({})".format(
+                        vm_name, response['nodeId'], response['startTime'], response['endTime']))
+                logging.error(response['error'])
+                m['failed_operations'] += 1
+                m['active_exports'] -= 1
+                export_complete = True
+            time.sleep(3)
+        return
+    except Exception as e:
+        logging.error("Fault during export, remove cache files and try again")
+        logging.error(traceback.print_exc())
+        m['active_exports'] -= 1
+        return
 
 
 # Returns latest snap_id from vm_id - if config['recovery_point'] then find closest to time without going over
 # 2019-09-15T07:02:54.470Z
 def get_snapshot_id(vm_name):
     snapshot_date_comparison = {}
-    closest_snapshot_date = ''
     if 'recovery_point' in config:
         recovery_point = pytz.utc.localize(parse(config['recovery_point']))
     else:
@@ -571,6 +618,8 @@ def get_snapshot_id(vm_name):
     uri = ("{}{}?primary_cluster_id=local&name={}".format(random.choice(node_ips), endpoint,
                                                                          urllib.parse.quote(vm_name)))
     res = requests.get(uri, headers=header, verify=False, timeout=config['small_timeout']).json()
+    if res['total'] < 1:
+        return '','','NOT_FOUND'
     for vm_response in res['data']:
         if vm_response['name'] == vm_name:
             endpoint = "/api/v1/vmware/vm/"
@@ -590,6 +639,8 @@ def get_snapshot_id(vm_name):
                             snapshot_date_comparison[delta]['cn'] = vm_response['clusterName']
                         except:
                             snapshot_date_comparison[delta]['cn'] = ''
+            else:
+                return 'NOT_FOUND', vm_response['clusterName'], vm_response['id']
     if snapshot_date_comparison:
         closest_snapshot_date = min(snapshot_date_comparison)
     else:
@@ -667,7 +718,6 @@ if __name__ == '__main__':
             svm_process.setDaemon(True)
             svm_process.start()
 
-    # Run the esx_serviced
     print("Running {}".format(config['function'].title()))
     run_threads(data, config['function_threads'], run_function)
     end = timer()
